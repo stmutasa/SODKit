@@ -8,7 +8,7 @@ It then stores the file as a numpy array and has functions to create the protoco
 
 """
 
-import glob, os, pickle, dicom, csv, random, cv2, math
+import glob, os, dicom, csv, random, cv2, math
 import scipy.ndimage
 
 import numpy as np
@@ -36,6 +36,17 @@ class SODLoader():
         self.data_root = data_root
         self.files_in_root = glob.glob('**/*', recursive=True)
 
+        # Data is all the data, everything else is instance based
+        self.data = {}
+
+        # Stuff for the dictionary
+        self.label = None
+        self.image = None
+        self.origin = None
+        self.spacing = None
+        self.dims = None
+        self.patient = None     # Usually the accession number
+
 
     """
      Data Loading Functions. Support for DICOM, Nifty, CSV
@@ -54,8 +65,20 @@ class SODLoader():
         :return: spacing: The spacing of the pixels in millimeters
         """
 
-        # Populate an array with the dicom slices
-        ndimage = [dicom.read_file(path + '/' + s) for s in os.listdir(path)]
+        # First try for files without the DICM marker
+        try:
+
+            # Populate an array with the dicom slices
+            ndimage = [dicom.read_file(path + '/' + s) for s in os.listdir(path)]
+
+        # Otherwise they have the marker
+        except:
+
+            # Find all the .dcm files
+            filenames = glob.glob(path + '/' + '*.dcm')
+
+            # Populate an array with the dicom slices
+            ndimage = [dicom.read_file(s) for s in filenames]
 
         # Sort the slices
         ndimage.sort(key=lambda x: int(x.ImagePositionPatient[2]))
@@ -261,13 +284,16 @@ class SODLoader():
         # Retreive the ID from the basename
         id = basename[:-13]
 
-        # os.path.dirname returns : Type1/108-15-p1
+        # os.path.dirname returns : source/Type1/108-15-p1
         dirname = os.path.dirname(filename)
 
         # Retreive the label from the dirname
-        label = os.path.split(dirname)
+        label = os.path.split(dirname)[-2].split('/')[-1]
 
-        return label, id
+        # Retreive the patient name
+        patient = os.path.split(dirname)[-1]
+
+        return label, id, patient
 
 
 
@@ -732,8 +758,11 @@ class SODLoader():
         # Otherwise just search this folder
         else: extension = ('*.%s' %extension)
 
+        # Join the pathnames
+        path = os.path.join(path, extension)
+
         # Return the list of filenames
-        return glob.glob(path + extension, recursive=include_subfolders)
+        return glob.glob(path, recursive=include_subfolders)
 
 
     def display_mosaic(self, vol, fig=None, title=None, size=[10, 10], vmin=None, vmax=None,
