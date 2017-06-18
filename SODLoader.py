@@ -9,16 +9,17 @@ It then stores the file as a numpy array and has functions to create the protoco
 """
 
 import glob, os, dicom, csv, random, cv2, math
-import scipy.ndimage
 
 import numpy as np
 import nibabel as nib
 import tensorflow as tf
 import SimpleITK as sitk
+import scipy.ndimage as scipy
+import matplotlib.image as mpimg
 
 from matplotlib import pyplot as plt
 from skimage import morphology
-import matplotlib.image as mpimg
+
 
 class SODLoader():
 
@@ -591,123 +592,44 @@ class SODLoader():
         return data
 
 
+    def generate_cube(self, image, origin=[], size=32):
+        """
+        This function returns a cube from the source image
+        :param image: The source image
+        :param origin: Center of the cube as a matrix of x,y,z
+        :param size: dimensions of the cube in mm
+        :return: cube: the cube itself
+        """
+
+        # Make the starting point = center-size unless near the edge then make it 0
+        startx = max(origin[0] - size/2, 0)
+        starty = max(origin[1] - size/2, 0)
+        startz = max(origin[2] - size/2, 0)
+
+        # If near the far edge, make it fit inside the image
+        if startx + size > image.shape[2]:
+            startx = image.shape[2] - size
+        if starty + size > image.shape[1]:
+            starty = image.shape[1] - size
+        if startz + size > image.shape[0]:
+            startz = image.shape[0] - size
+
+        # Convert to integers
+        startx = int(startx)
+        starty = int(starty)
+        startz = int(startz)
+
+        # Now retreive the box
+        box = image[startz:startz + size, starty:starty + size, startx:startx + size]
+
+        return box
+
+
     """
          Utility functions: Random tools for help
     """
 
-    def random_3daffine(self, angle=45):
-        """
-        Method to generate a random 4 x 4 affine transformation matrix.
-        :param angle: the range of angles to generate
-
-        """
-        # Define the affine scaling
-        sx = 1
-        sy = 1
-        sz = 1
-
-        # Define the affine angles of rotation
-        anglex = random.randrange(-angle, angle)
-        anglex = math.radians(anglex)
-
-        angley = random.randrange(-angle, angle)
-        angley = math.radians(angley)
-
-        anglez = random.randrange(-angle, angle)
-        anglez = math.radians(anglez)
-
-        # Define the first affine transform with scaling and translations and rotation about x
-        tx = np.float32([[sx, 0, 0],
-                         [0, sy * math.cos(anglex), -1 * math.sin(anglex)],
-                         [0, math.sin(anglex), sz * math.cos(anglex)]])
-
-        # Another for y (really z once MIPED)
-        ty = np.float32([[math.cos(angley), 0, math.sin(angley)],
-                         [0, 1, 0],
-                         [-1 * math.sin(angley), 0, math.cos(angley)]])
-
-        # Another for Z (really y once MIPED)
-        tz = np.float32([[math.cos(anglez), -1 * math.sin(anglez), 0],
-                         [math.sin(anglez), math.cos(anglez), 0],
-                         [0, 0, 1]])
-
-        return tx, ty, tz, anglex, angley, anglez
-
-
-    def display_single_image(self, nda, plot=True, title=None, cmap='gray', margin=0.05):
-        """ Helper function to display a numpy array using matplotlib
-        Args:
-            nda: The source image as a numpy array
-            title: what to title the picture drawn
-            margin: how wide a margin to use
-            plot: plot or not
-        Returns:
-            none"""
-
-        # Set up the figure object
-        fig = plt.figure()
-        ax = fig.add_axes([margin, margin, 1 - 2 * margin, 1 - 2 * margin])
-
-        # The rest is standard matplotlib fare
-        plt.set_cmap(cmap)  # Print in greyscale
-        ax.imshow(nda)
-
-        if title: plt.title(title)
-        if plot: plt.show()
-
-
-    def reshape_NHWC(self, vol, NHWC):
-        """
-        Method to reshape 2D or 3D tensor into Tensorflow's NHWC format
-        vol: The image data
-        NHWC whether the input has a channel dimension
-        """
-
-        # If this is a 2D image
-        if len(vol.shape) == 2:
-
-            # Create an extra channel at the beginning
-            vol = np.expand_dims(vol, axis=0)
-
-        # If there are 3 dimensions to the shape (2D with channels or 3D)
-        if len(vol.shape) == 3:
-
-            # If there is no channel dimension (i.e. grayscale)
-            if not NHWC:
-
-                # Move the last axis (Z) to the first axis
-                vol = np.moveaxis(vol, -1, 0)
-
-            # Create another axis at the end for channel
-            vol = np.expand_dims(vol, axis=3)
-
-
-        return vol
-
-
-    def gray2rgb(self, img, maximum_val=1, percentile=0):
-        """
-        Method to convert H x W grayscale tensor to H x W x 3 RGB grayscale
-        :params
-        (np.array) img : input H x W tensor
-        (int) maximum_val : maximum value in output
-          if maximum_val == 1, output is assumed to be float32
-          if maximum_val == 255, output is assumed to be uint8 (standard 256 x 256 x 256 RGB image)
-        (int) percentile : lower bound to set to 0
-        """
-        img_min, img_max = np.percentile(img, percentile), np.percentile(img, 100 - percentile)
-        img = (img - img_min) / (img_max - img_min)
-        img[img > 1] = 1
-        img[img < 0] = 0
-        img = img * maximum_val
-        img = np.expand_dims(img, 2)
-        img = np.tile(img, [1, 1, 3])
-
-        dtype = 'float32' if maximum_val == 1 else 'uint8'
-        return img.astype(dtype)
-
-
-    def imoverlay(self, img, mask):
+    def display_overlay(self, img, mask):
         """
         Method to superimpose masks on 2D image
         :params
@@ -740,29 +662,26 @@ class SODLoader():
             return np.concatenate(tuple(overlay), axis=2)
 
 
-    def retreive_filelist(self, extension, include_subfolders=False, path=None):
-        """
-        Returns a list with all the files of a certain type in path
-        :param extension: what extension to search for
-        :param include_subfolders: whether to include subfolders
-        :param path: specified path. otherwise use data root
-        :return:
-        """
+    def display_single_image(self, nda, plot=True, title=None, cmap='gray', margin=0.05):
+        """ Helper function to display a numpy array using matplotlib
+        Args:
+            nda: The source image as a numpy array
+            title: what to title the picture drawn
+            margin: how wide a margin to use
+            plot: plot or not
+        Returns:
+            none"""
 
-        # If no path specified use the default data root
-        if not path: path = self.data_root
+        # Set up the figure object
+        fig = plt.figure()
+        ax = fig.add_axes([margin, margin, 1 - 2 * margin, 1 - 2 * margin])
 
-        # If we're including subfolders
-        if include_subfolders: extension = ('**/*.%s' % extension)
+        # The rest is standard matplotlib fare
+        plt.set_cmap(cmap)  # Print in greyscale
+        ax.imshow(nda)
 
-        # Otherwise just search this folder
-        else: extension = ('*.%s' %extension)
-
-        # Join the pathnames
-        path = os.path.join(path, extension)
-
-        # Return the list of filenames
-        return glob.glob(path, recursive=include_subfolders)
+        if title: plt.title(title)
+        if plot: plt.show()
 
 
     def display_mosaic(self, vol, fig=None, title=None, size=[10, 10], vmin=None, vmax=None,
@@ -858,6 +777,130 @@ class SODLoader():
         return returns
 
 
+    def display_volume(self, volume):
+        self.remove_keymap_conflicts({'j', 'k'})
+        fig, ax = plt.subplots()
+        ax.volume = volume
+        ax.index = volume.shape[0] // 2
+        ax.imshow(volume[ax.index])
+        fig.canvas.mpl_connect('key_press_event', self.process_key)
+
+
+    def reshape_NHWC(self, vol, NHWC):
+        """
+        Method to reshape 2D or 3D tensor into Tensorflow's NHWC format
+        vol: The image data
+        NHWC whether the input has a channel dimension
+        """
+
+        # If this is a 2D image
+        if len(vol.shape) == 2:
+
+            # Create an extra channel at the beginning
+            vol = np.expand_dims(vol, axis=0)
+
+        # If there are 3 dimensions to the shape (2D with channels or 3D)
+        if len(vol.shape) == 3:
+
+            # If there is no channel dimension (i.e. grayscale)
+            if not NHWC:
+
+                # Move the last axis (Z) to the first axis
+                vol = np.moveaxis(vol, -1, 0)
+
+            # Create another axis at the end for channel
+            vol = np.expand_dims(vol, axis=3)
+
+
+        return vol
+
+
+    def gray2rgb(self, img, maximum_val=1, percentile=0):
+        """
+        Method to convert H x W grayscale tensor to H x W x 3 RGB grayscale
+        :params
+        (np.array) img : input H x W tensor
+        (int) maximum_val : maximum value in output
+          if maximum_val == 1, output is assumed to be float32
+          if maximum_val == 255, output is assumed to be uint8 (standard 256 x 256 x 256 RGB image)
+        (int) percentile : lower bound to set to 0
+        """
+        img_min, img_max = np.percentile(img, percentile), np.percentile(img, 100 - percentile)
+        img = (img - img_min) / (img_max - img_min)
+        img[img > 1] = 1
+        img[img < 0] = 0
+        img = img * maximum_val
+        img = np.expand_dims(img, 2)
+        img = np.tile(img, [1, 1, 3])
+
+        dtype = 'float32' if maximum_val == 1 else 'uint8'
+        return img.astype(dtype)
+
+
+    def random_3daffine(self, angle=45):
+        """
+        Method to generate a random 4 x 4 affine transformation matrix.
+        :param angle: the range of angles to generate
+
+        """
+        # Define the affine scaling
+        sx = 1
+        sy = 1
+        sz = 1
+
+        # Define the affine angles of rotation
+        anglex = random.randrange(-angle, angle)
+        anglex = math.radians(anglex)
+
+        angley = random.randrange(-angle, angle)
+        angley = math.radians(angley)
+
+        anglez = random.randrange(-angle, angle)
+        anglez = math.radians(anglez)
+
+        # Define the first affine transform with scaling and translations and rotation about x
+        tx = np.float32([[sx, 0, 0],
+                         [0, sy * math.cos(anglex), -1 * math.sin(anglex)],
+                         [0, math.sin(anglex), sz * math.cos(anglex)]])
+
+        # Another for y (really z once MIPED)
+        ty = np.float32([[math.cos(angley), 0, math.sin(angley)],
+                         [0, 1, 0],
+                         [-1 * math.sin(angley), 0, math.cos(angley)]])
+
+        # Another for Z (really y once MIPED)
+        tz = np.float32([[math.cos(anglez), -1 * math.sin(anglez), 0],
+                         [math.sin(anglez), math.cos(anglez), 0],
+                         [0, 0, 1]])
+
+        return tx, ty, tz, anglex, angley, anglez
+
+
+    def retreive_filelist(self, extension, include_subfolders=False, path=None):
+        """
+        Returns a list with all the files of a certain type in path
+        :param extension: what extension to search for
+        :param include_subfolders: whether to include subfolders
+        :param path: specified path. otherwise use data root
+        :return:
+        """
+
+        # If no path specified use the default data root
+        if not path: path = self.data_root
+
+        # If we're including subfolders
+        if include_subfolders: extension = ('**/*.%s' % extension)
+
+        # Otherwise just search this folder
+        else: extension = ('*.%s' %extension)
+
+        # Join the pathnames
+        path = os.path.join(path, extension)
+
+        # Return the list of filenames
+        return glob.glob(path, recursive=include_subfolders)
+
+
     """
          Tool functions: Most of these are hidden
     """
@@ -930,4 +973,32 @@ class SODLoader():
         return [z[0][0], z[0][-1]]
 
 
+    def process_key(self, event):
+        fig = event.canvas.figure
+        ax = fig.axes[0]
+        if event.key == 'j':
+            self.previous_slice(ax)
+        elif event.key == 'k':
+            self.next_slice(ax)
+        fig.canvas.draw()
 
+
+    def previous_slice(self, ax):
+        volume = ax.volume
+        ax.index = (ax.index - 1) % volume.shape[0]  # wrap around using %
+        ax.images[0].set_array(volume[ax.index])
+
+
+    def next_slice(self, ax):
+        volume = ax.volume
+        ax.index = (ax.index + 1) % volume.shape[0]
+        ax.images[0].set_array(volume[ax.index])
+
+
+    def remove_keymap_conflicts(self, new_keys_set):
+        for prop in plt.rcParams:
+            if prop.startswith('keymap.'):
+                keys = plt.rcParams[prop]
+                remove_list = set(keys) & new_keys_set
+                for key in remove_list:
+                    keys.remove(key)
