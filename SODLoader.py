@@ -320,6 +320,42 @@ class SODLoader():
         return voxelCoord
 
 
+    def create_breast_mask(self, image):
+        """
+        Creates a rough mask of breast tissue returned as 1 = breast 0 = nothing
+        :param image: 
+        :return: mask: the mask volume
+        """
+
+        # Create the mask
+        mask = np.copy(image)
+
+        # Loop through the image volume
+        for k in range(0, image.shape[0]):
+
+            # Apply gaussian blur to smooth the image
+            mask[k] = cv2.GaussianBlur(mask[k], (5, 5), 0)
+            # mask[k] = cv2.bilateralFilter(mask[k].astype(np.float32),9,75,75)
+
+            # Threshold the image
+            mask[k] = np.squeeze(mask[k] < 15)
+
+            # Define the CV2 structuring element
+            radius_close = np.round(mask.shape[1] / 45).astype('int16')
+            kernel_close = cv2.getStructuringElement(shape=cv2.MORPH_ELLIPSE, ksize=(radius_close, radius_close))
+
+            # Apply morph close
+            mask[k] = cv2.morphologyEx(mask[k], cv2.MORPH_CLOSE, kernel_close)
+
+            # Invert mask
+            mask[k] = ~mask[k]
+
+            # Add 2
+            mask[k] += 2
+
+        return mask
+
+
     def create_lung_mask(self, image, radius_erode=2):
         """
         Method to create lung mask.
@@ -379,7 +415,7 @@ class SODLoader():
         return mask
 
 
-    def screate_bone_mask(self, image, seed):
+    def create_bone_mask(self, image, seed):
         """
         Creates a bone mask
         :param image: input image
@@ -592,7 +628,7 @@ class SODLoader():
         return data
 
 
-    def generate_cube(self, image, origin=[], size=32):
+    def generate_box(self, image, origin=[], size=32):
         """
         This function returns a cube from the source image
         :param image: The source image
@@ -782,7 +818,7 @@ class SODLoader():
         fig, ax = plt.subplots()
         ax.volume = volume
         ax.index = volume.shape[0] // 2
-        ax.imshow(volume[ax.index])
+        ax.imshow(volume[ax.index], cmap='gray')
         fig.canvas.mpl_connect('key_press_event', self.process_key)
 
 
