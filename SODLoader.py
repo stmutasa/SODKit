@@ -1,10 +1,9 @@
 """
-SOD Loader is the class for loading various file types including:
-JPegs
-Nifty
-DICOM
+SOD Loader is the class for loading various file types including: JPegs Nifty and DICOM into numpy arrays.
 
-It then stores the file as a numpy array and has functions to create the protocol buffer
+There are also functions to preprocess the data including: segmenting lungs, generating cubes, and creating MIPs
+
+It then contains functions to store the file as a protocol buffer
 
 """
 
