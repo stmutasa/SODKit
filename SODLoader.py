@@ -203,10 +203,13 @@ class SODLoader():
             # Name the key as the indexname
             key = row.pop(indexname)
 
-            # What to do if there is a duplicate
+            # What to do if there is a duplicate: rename with 1 at the end,
             if key in return_dict:
-                print ("Duplicate entry found in dict %s" %key)
-                continue
+                key = key + '1'
+
+                # For another duplicate, do the same
+                if key in return_dict:
+                    key = key + '2'
 
             # Make the entire row (as a dict) the index
             return_dict[key] = row
@@ -214,10 +217,11 @@ class SODLoader():
         return return_dict
 
 
-    def load_NIFTY(self, path):
+    def load_NIFTY(self, path, reshape=True):
         """
         This function loads a .nii.gz file into a numpy array with dimensions Z, Y, X, C
-        :param filename:
+        :param filename: path to the file
+        :param reshape: whether to reshape the axis from/to ZYX
         :return:
         """
 
@@ -225,7 +229,8 @@ class SODLoader():
         raw_data = nib.load(path)
 
         # Reshape the image data from NiB's XYZ to numpy's ZYXC
-        data = self.reshape_NHWC(raw_data.get_data(), False)
+        if reshape: data = self.reshape_NHWC(raw_data.get_data(), False)
+        else: data = raw_data.get_data()
 
         # Return the data
         return data

@@ -6,6 +6,7 @@ convolutions, deconvolutions, 3D convolutions,
 """
 
 import tensorflow as tf
+import numpy as np
 
 
 class SODMatrix():
@@ -71,6 +72,60 @@ class SODMatrix():
             if summary: self._activation_summary(conv)
 
             return conv
+
+
+    def depthwise_convolution(self, scope, X, F, K, S=2, padding='SAME', phase_train=None, summary=True, BN=True):
+            """
+            This is a wrapper for depthwise convolutions
+            :param scope:
+            :param X: Output of the prior layer
+            :param F: Convolutional filter size
+            :param K: Number of feature maps
+            :param S: Stride
+            :param padding: 'SAME' or 'VALID'
+            :param phase_train: For batch norm implementation
+            :param summary: whether to produce a tensorboard summary of this layer
+            :param BN: whether to perform batch normalization
+            :return: conv: the result of everything
+            """
+
+            # Set channel size based on input depth
+            C = X.get_shape().as_list()[3]
+
+            # Set the scope
+            with tf.variable_scope(scope) as scope:
+
+                # Define the Kernel. Can use Xavier init: contrib.layers.xavier_initializer())
+                kernel = tf.get_variable('Weights', shape=[F, F, C, K],
+                                         initializer=tf.contrib.layers.xavier_initializer())
+
+                # Add to the weights collection
+                tf.add_to_collection('weights', kernel)
+
+                # Perform the actual convolution
+                conv = tf.nn.depthwise_conv2d(X, kernel, [1, S, S, 1], padding=padding)
+
+                # Apply the batch normalization. Updates weights during training phase only
+                if BN:
+                    norm = tf.cond(phase_train,
+                                   lambda: tf.contrib.layers.batch_norm(conv, activation_fn=None, center=True,
+                                                                        scale=True,
+                                                                        updates_collections=None, is_training=True,
+                                                                        reuse=None,
+                                                                        scope=scope, decay=0.9, epsilon=1e-5),
+                                   lambda: tf.contrib.layers.batch_norm(conv, activation_fn=None, center=True,
+                                                                        scale=True,
+                                                                        updates_collections=None, is_training=False,
+                                                                        reuse=True,
+                                                                        scope=scope, decay=0.9, epsilon=1e-5))
+
+                # Relu activation
+                conv = tf.nn.relu(norm, name=scope.name)
+
+                # Create a histogram/scalar summary of the conv1 layer
+                if summary: self._activation_summary(conv)
+
+                return conv
 
 
     def deconvolution(self, scope, X, F, K, S, padding='SAME', phase_train=None,
@@ -255,6 +310,94 @@ class SODMatrix():
         return
 
 
+    def fc7_layer(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5, summary=True):
+        """
+        Wrapper for implementing a fully connected layer
+        :param scope: Scopename of the layer
+        :param X: Input of the prior layer
+        :param neurons: Desired number of neurons in the layer
+        :param dropout: Whether to implement dropout here
+        :param phase_train: Are we in testing or training phase = only relevant for dropout
+        :param keep_prob: if doing dropout, the keep probability
+        :param summary: Whether to output a summary
+        :return: fc7: the result of all of the above
+        """
+
+        # The Fc7 layer scope
+        with tf.variable_scope(scope) as scope:
+
+            # Retreive the batch size of the last layer
+            batch_size = X.get_shape().as_list()[0]
+
+            # Flatten the input layer
+            reshape = tf.reshape(X, [batch_size, -1])
+
+            # Retreive the number of columns in the flattened layer
+            dim = reshape.get_shape()[1].value
+
+            # Initialize the weights
+            weights = tf.get_variable('weights', shape=[dim, neurons],
+                                      initializer=tf.truncated_normal_initializer(stddev=5e-2))
+
+            # Add to the collection of weights
+            tf.add_to_collection('weights', weights)
+
+            # Initialize the biases
+            biases = tf.Variable(np.ones(neurons), name='Bias', dtype=tf.float32)
+
+            # Do the math
+            fc7 = tf.nn.relu(tf.matmul(reshape, weights) + biases, name=scope.name)
+
+            # Dropout here if wanted and in train phase
+            if phase_train and dropout: fc7 = tf.nn.dropout(fc7, keep_prob)
+
+            # Activation summary
+            if summary: self._activation_summary(fc7)
+
+            return fc7
+
+
+    def linear_layer(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5, summary=True):
+        """
+        Wrapper for implementing a fully connected layer
+        :param scope: Scopename of the layer
+        :param X: Input of the prior layer
+        :param neurons: Desired number of neurons in the layer
+        :param dropout: Whether to implement dropout here
+        :param phase_train: Are we in testing or training phase
+        :param keep_prob: if doing dropout, the keep probability
+        :param summary: Whether to output a summary
+        :return: fc7: the result of all of the above
+        """
+
+        # Retreive the size of the last layer
+        dim = X.get_shape().as_list()[-1]
+
+        # The linear layer Dimensions:
+        with tf.variable_scope(scope) as scope:
+
+            # Initialize the weights
+            weights = tf.get_variable('weights', shape=[dim, neurons],
+                                      initializer=tf.truncated_normal_initializer(stddev=5e-2))
+
+            # Add to the collection of weights
+            tf.add_to_collection('weights', weights)
+
+            # Initialize the biases
+            biases = tf.Variable(np.ones(neurons), name='Bias', dtype=tf.float32)
+
+            # Do the math
+            linear = tf.nn.relu(tf.matmul(X, weights) + biases, name=scope.name)
+
+            # Dropout here if wanted and in train phase
+            if phase_train and dropout: linear = tf.nn.dropout(linear, keep_prob)
+
+            # Activation summary
+            if summary: self._activation_summary(linear)
+
+            return linear
+
+
     """
          Loss function wrappers
     """
@@ -321,3 +464,30 @@ class SODMatrix():
 
         # For now return MSE loss, add L2 regularization below later
         return MSE_loss
+
+
+    def SCE_loss(self, logits, labels, num_classes, summary=True):
+        """
+        Calculates the softmax cross entropy loss between logits and labels
+        :param logits:
+        :param labels:
+        :param num_classes: the number of classes
+        :param summary: whether to output a summary of the loss to tensorboard
+        :return:
+        """
+        # Change labels to one hot
+        labels = tf.one_hot(tf.cast(labels, tf.uint8), depth=num_classes, dtype=tf.uint8)
+
+        # Calculate  loss
+        loss = tf.nn.softmax_cross_entropy_with_logits(labels=labels, logits=logits)
+
+        # Reduce to scalar
+        loss = tf.reduce_mean(loss)
+
+        # Output the summary of the MSE and MAE
+        if summary: tf.summary.scalar('Cross Entropy', loss)
+
+        # Add these losses to the collection
+        tf.add_to_collection('losses', loss)
+
+        return loss
