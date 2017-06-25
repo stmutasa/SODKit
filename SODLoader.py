@@ -364,21 +364,26 @@ class SODLoader():
         """
         Method to create lung mask.
         """
+
+        # Define the radius of the structuring elements
         height = image.shape[1]  # Holder for the variable
         radius_close = np.round(height / 12).astype('int16')
         radius_dilate = np.round(height / 12).astype('int16')
 
+        # Create the structuring elements
         kernel_erode = cv2.getStructuringElement(shape=cv2.MORPH_ELLIPSE, ksize=(radius_erode, radius_erode))
         kernel_close = cv2.getStructuringElement(shape=cv2.MORPH_ELLIPSE, ksize=(radius_close, radius_close))
         kernel_dilate = cv2.getStructuringElement(shape=cv2.MORPH_ELLIPSE, ksize=(radius_dilate, radius_dilate))
         shape = image.shape[1:3]
 
+        # Start with an edge mask
         edge_mask = np.zeros(shape=shape, dtype='bool')
         edge_mask[0:2, :] = True
         edge_mask[:, 0:2] = True
         edge_mask[-2:, :] = True
         edge_mask[:, -2:] = True
 
+        # STart the mask off with houndsfield units below this number
         mask = np.squeeze(image < -500)
 
         # Remove background air
@@ -426,9 +431,6 @@ class SODLoader():
         :param seed: seedpoints for non bone areas to start the threshold
         :return: image: the bone mask with areas of bone = 0
         """
-        """
-        Method to create bone mask.
-        """
 
         # Holder for the height variable
         slices = image.shape[0]
@@ -459,6 +461,32 @@ class SODLoader():
 
         # Return the inverted masks
         return image
+
+
+    def create_table_mask(self, image, factor=30):
+        """
+        Creates a mask of the table in scans
+        :param image: the 3d volume to mask, numpy format
+        :param factor: factor to divide by. the bigger it is, the smaller the radius of closing
+        :return: the mask with table and background as 0
+        """
+
+        # Define the radius of the structuring element. Make it equal to the width of the scan divided by factor
+        radius_close = np.round(image.shape[1] / factor).astype('int16')
+
+        # Create the structuring element
+        kernel_close = cv2.getStructuringElement(shape=cv2.MORPH_ELLIPSE, ksize=(radius_close, radius_close))
+
+        # Start the mask off with houndsfield units below this threshold
+        mask = np.squeeze(image < -500)
+
+        # Close the mask
+        for z in range(image.shape[0]):
+            # Just use morphological closing
+            mask[z] = cv2.morphologyEx(mask[z].astype(np.int16), cv2.MORPH_CLOSE, kernel_close)
+
+        # Return the inverted masks
+        return ~mask
 
 
     def create_MIP_2D(self, vol, slice, thickness=5.0, slice_spacing=1.0):
@@ -584,7 +612,7 @@ class SODLoader():
         real_resize_factor = new_shape / image.shape
         new_spacing = spacing / real_resize_factor
 
-        image = scipy.ndimage.interpolation.zoom(image, real_resize_factor, mode='nearest')
+        image = scipy.interpolation.zoom(image, real_resize_factor, mode='nearest')
 
         return image, new_spacing
 
@@ -765,7 +793,7 @@ class SODLoader():
         if plot: plt.show()
 
 
-    def display_mosaic(self, vol, fig=None, title=None, size=[10, 10], vmin=None, vmax=None,
+    def display_mosaic(self, vol, plot=False, fig=None, title=None, size=[10, 10], vmin=None, vmax=None,
                return_mosaic=False, cbar=True, return_cbar=False, **kwargs):
         """
         Display a 3-d volume of data as a 2-d mosaic
@@ -805,7 +833,7 @@ class SODLoader():
             mode = 'standard'
 
         for i in range(1, sq):
-            this_im = np.hstack(vol[(len(vol) / sq) * i:(len(vol) / sq) * (i + 1)])
+            this_im = np.hstack(vol[int(len(vol) / sq) * i:int(len(vol) / sq) * (i + 1)])
             wid_margin = width - this_im.shape[1]
             if wid_margin:
                 if mode == 'standard':
@@ -855,16 +883,20 @@ class SODLoader():
         if len(returns) == 1:
             returns = returns[0]
 
+        # If we are displaying:
+        if plot: plt.show()
+
         return returns
 
 
-    def display_volume(self, volume):
+    def display_volume(self, volume, plot=False):
         self.remove_keymap_conflicts({'j', 'k'})
         fig, ax = plt.subplots()
         ax.volume = volume
         ax.index = volume.shape[0] // 2
         ax.imshow(volume[ax.index], cmap='gray')
         fig.canvas.mpl_connect('key_press_event', self.process_key)
+        if plot: plt.show()
 
 
     def reshape_NHWC(self, vol, NHWC):
