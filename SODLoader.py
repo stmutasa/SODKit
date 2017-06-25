@@ -7,7 +7,7 @@ It then contains functions to store the file as a protocol buffer
 
 """
 
-import glob, os, dicom, csv, random, cv2, math
+import glob, os, dicom, csv, random, cv2, math, astra
 
 import numpy as np
 import nibabel as nib
@@ -15,8 +15,8 @@ import tensorflow as tf
 import SimpleITK as sitk
 import scipy.ndimage as scipy
 import matplotlib.image as mpimg
+import matplotlib.pyplot as plt
 
-from matplotlib import pyplot as plt
 from skimage import morphology
 
 
@@ -665,6 +665,47 @@ class SODLoader():
         return box
 
 
+    def generate_DRR(self, volume_data, parameters):
+        # Create projection data from this
+        # data passed in order is z,y,x
+        # need y,x,z for vol_goem shape
+        # for astra data3d need z,y,x
+
+        shape = volume_data.shape
+
+        x = shape[2]
+        y = shape[1]
+        z = shape[0]
+
+        vol_geom = astra.create_vol_geom(y, x, z)
+        vectors = np.zeros((1, 12))
+
+        # source
+        vectors[0, 0] = 0
+        vectors[0, 1] = -y / 2
+        vectors[0, 2] = 0
+
+        # center of detector plane
+        vectors[0, 3] = 0
+        vectors[0, 4] = y / 2
+        vectors[0, 5] = 0
+
+        # vector from detector pixel (0,0) to (0,1)
+        vectors[0, 6] = 1
+        vectors[0, 7] = 0
+        vectors[0, 8] = 0
+
+        # vector from detector pixel (0,0) to (1,0)
+        vectors[0, 9] = 0
+        vectors[0, 10] = 0
+        vectors[0, 11] = -1
+
+        proj_geom = astra.create_proj_geom('parallel3d_vec', 512, 512, vectors)
+        proj_id, proj_data = astra.create_sino3d_gpu(volume_data, proj_geom, vol_geom)
+        astra.data3d.delete(proj_id)
+        return proj_data
+
+
     """
          Utility functions: Random tools for help
     """
@@ -1042,3 +1083,4 @@ class SODLoader():
                 remove_list = set(keys) & new_keys_set
                 for key in remove_list:
                     keys.remove(key)
+
