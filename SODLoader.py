@@ -617,6 +617,22 @@ class SODLoader():
         return image, new_spacing
 
 
+    def zoom_3D(self, volume, factor):
+        """
+        Uses scipy to zoom a 3D volume to a new shape
+        :param volume: 
+        :param factor: 
+        :return: 
+        """
+
+        # Define the resize matrix
+        resize_factor = [factor[0] / volume.shape[0], factor[1] / volume.shape[1],
+                         factor[2] / volume.shape[2]]
+
+        # Perform the zoom
+        return scipy.interpolation.zoom(volume, resize_factor, mode='nearest')
+
+
     def affine_transform_data(self, data, tform, data_key=1):
         """
         Method to augment data by affine transform and random offset.
@@ -896,6 +912,25 @@ class SODLoader():
         ax.index = volume.shape[0] // 2
         ax.imshow(volume[ax.index], cmap='gray')
         fig.canvas.mpl_connect('key_press_event', self.process_key)
+        if plot: plt.show()
+
+
+    def display_stack(self, stack, plot=False, rows=6, cols=6, start_with=10, show_every=3):
+        """
+        Displays a mosaic of images with skipped slices in between
+        :param stack: 
+        :param rows: 
+        :param cols: 
+        :param start_with: 
+        :param show_every: 
+        :return: 
+        """
+        fig, ax = plt.subplots(rows, cols, figsize=[12, 12])
+        for i in range(rows * cols):
+            ind = start_with + i * show_every
+            ax[int(i / rows), int(i % rows)].set_title('slice %d' % ind)
+            ax[int(i / rows), int(i % rows)].imshow(stack[ind], cmap='gray')
+            ax[int(i / rows), int(i % rows)].axis('off')
         if plot: plt.show()
 
 
