@@ -633,6 +633,40 @@ class SODLoader():
         return scipy.interpolation.zoom(volume, resize_factor, mode='nearest')
 
 
+    def fast_3d_affine(self, image, angle_range=[]):
+
+        # The image is sent in Z,Y,X format
+        Z, Y, X = image.shape
+
+        # OpenCV makes interpolated pixels equal 0. Add the minumum value to subtract it later
+        img_min = abs(image.min())
+        image = np.add(image, img_min)
+
+        # Define the affine angles of rotation
+        anglex = random.randrange(-angle_range[0], angle_range[0])
+        angley = random.randrange(-angle_range[1], angle_range[1])
+        anglez = random.randrange(-angle_range[2], angle_range[2])
+
+        # Matrix to rotate along saggital plane (Y columns, Z rows)
+        M = cv2.getRotationMatrix2D((Y / 2, Z / 2), anglex, 1)
+
+        # Apply the saggital transform slice by slice along X
+        for i in range(0, X): image[:, :, i] = cv2.warpAffine(image[:, :, i], M, (Y, Z))
+
+        # Matrix to rotate along Coronal plane (Z and X) and apply
+        M = cv2.getRotationMatrix2D((X / 2, Z / 2), angley, 1)
+        for i in range(0, Y): image[:, i, :] = cv2.warpAffine(image[:, i, :], M, (X, Z))
+
+        # # Matrix to rotate along Axial plane (X and Y)
+        M = cv2.getRotationMatrix2D((Y / 2, X / 2), anglez, 1)
+        for i in range(0, Z): image[i, :, :] = cv2.warpAffine(image[i, :, :], M, (Y, X))
+
+        # Return the image to normal HU
+        image = np.subtract(image, img_min)
+
+        return image, anglex, angley, anglez
+
+
     def affine_transform_data(self, data, tform, data_key=1):
         """
         Method to augment data by affine transform and random offset.
