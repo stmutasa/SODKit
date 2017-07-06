@@ -301,6 +301,35 @@ class SODLoader():
         return label, id, patient
 
 
+    def load_sachin_labels(self, filename):
+
+        """
+        To retreive the labels and patient ID using sachin's naming convention
+        :param filename: the file name. something like data/P_028_G_2_id_104152_label.nii.gz
+        :return: label, id : self explanatory
+        """
+
+        # os.path.basename returns : P_001_G_2_id_100041_label.nii.gz
+        basename = os.path.basename(filename)
+
+        # Retreive the ID from the basename
+        id = os.path.split(basename)[-1].split('id_')[-1][:6]
+
+        # Retreive the label from the basename
+        label = os.path.split(basename)[-1].split('G_')[-1][:1]
+
+        # Retreive the patient name
+        patient = os.path.split(basename)[-1].split('P_')[-1][:3]
+
+        # retreive the phase name if available
+        if 'D' in filename:
+            phase = os.path.split(basename)[-1].split('D_')[-1][:2]
+        else:
+            phase = 'label'
+
+        return patient, label, id, phase
+
+
 
     """
              Pre processing functions.
