@@ -24,7 +24,7 @@ class SODMatrix():
      Convolution wrappers
     """
 
-    def convolution(self, scope, X, F, K, S=2, padding='SAME', phase_train=None, summary=True, BN=True):
+    def convolution(self, scope, X, F, K, S=2, padding='SAME', phase_train=None, summary=True, BN=True, relu=True):
         """
         This is a wrapper for convolutions
         :param scope:
@@ -36,6 +36,7 @@ class SODMatrix():
         :param phase_train: For batch norm implementation
         :param summary: whether to produce a tensorboard summary of this layer
         :param BN: whether to perform batch normalization
+        :param relu: bool, whether to do the activation function at the end
         :return:
         """
 
@@ -57,7 +58,7 @@ class SODMatrix():
 
             # Apply the batch normalization. Updates weights during training phase only
             if BN:
-                norm = tf.cond(phase_train,
+                conv = tf.cond(phase_train,
                                lambda: tf.contrib.layers.batch_norm(conv, activation_fn=None, center=True, scale=True,
                                                             updates_collections=None, is_training=True, reuse=None,
                                                             scope=scope, decay=0.9, epsilon=1e-5),
@@ -66,7 +67,57 @@ class SODMatrix():
                                                             scope=scope, decay=0.9, epsilon=1e-5))
 
             # Relu activation
-            conv = tf.nn.relu(norm, name=scope.name)
+            if relu: conv = tf.nn.relu(conv, name=scope.name)
+
+            # Create a histogram/scalar summary of the conv1 layer
+            if summary: self._activation_summary(conv)
+
+            return conv
+
+
+    def convolution_3d(self, scope, X, F, K, S=2, padding='SAME', phase_train=None, summary=True, BN=True):
+        """
+        This is a wrapper for 3-dimensional convolutions
+        :param scope:
+        :param X: Output of the prior layer
+        :param F: Convolutional filter size
+        :param K: Number of feature maps
+        :param S: Stride
+        :param padding: 'SAME' or 'VALID'
+        :param phase_train: For batch norm implementation
+        :param summary: whether to produce a tensorboard summary of this layer
+        :param BN: whether to perform batch normalization
+        :return:
+        """
+
+        # Set channel size based on input depth
+        C = X.get_shape().as_list()[-1]
+
+        # Set the scope
+        with tf.variable_scope(scope) as scope:
+
+            # Define the Kernel. Can use Xavier init: contrib.layers.xavier_initializer())
+            kernel = tf.get_variable('Weights', shape=[F, F, F, C, K],
+                                     initializer=tf.contrib.layers.xavier_initializer())
+
+            # Add to the weights collection
+            tf.add_to_collection('weights', kernel)
+
+            # Perform the actual convolution
+            conv = tf.nn.conv3d(X, kernel, [1, S, S, S, 1], padding=padding)  # Create a 2D tensor with BATCH_SIZE rows
+
+            # Apply the batch normalization. Updates weights during training phase only
+            if BN:
+                conv = tf.cond(phase_train,
+                               lambda: tf.contrib.layers.batch_norm(conv, activation_fn=None, center=True, scale=True,
+                                                            updates_collections=None, is_training=True, reuse=None,
+                                                            scope=scope, decay=0.9, epsilon=1e-5),
+                               lambda: tf.contrib.layers.batch_norm(conv, activation_fn=None, center=True, scale=True,
+                                                            updates_collections=None, is_training=False, reuse=True,
+                                                            scope=scope, decay=0.9, epsilon=1e-5))
+
+            # Relu activation
+            conv = tf.nn.relu(conv, name=scope.name)
 
             # Create a histogram/scalar summary of the conv1 layer
             if summary: self._activation_summary(conv)
@@ -107,7 +158,7 @@ class SODMatrix():
 
                 # Apply the batch normalization. Updates weights during training phase only
                 if BN:
-                    norm = tf.cond(phase_train,
+                    conv = tf.cond(phase_train,
                                    lambda: tf.contrib.layers.batch_norm(conv, activation_fn=None, center=True,
                                                                         scale=True,
                                                                         updates_collections=None, is_training=True,
@@ -120,7 +171,7 @@ class SODMatrix():
                                                                         scope=scope, decay=0.9, epsilon=1e-5))
 
                 # Relu activation
-                conv = tf.nn.relu(norm, name=scope.name)
+                conv = tf.nn.relu(conv, name=scope.name)
 
                 # Create a histogram/scalar summary of the conv1 layer
                 if summary: self._activation_summary(conv)
@@ -170,7 +221,7 @@ class SODMatrix():
 
             # Apply the batch normalization. Updates weights during training phase only
             if BN:
-                norm = tf.cond(phase_train,
+                conv = tf.cond(phase_train,
                                lambda: tf.contrib.layers.batch_norm(conv, activation_fn=None, center=True, scale=True,
                                                                     updates_collections=None, is_training=True,
                                                                     reuse=None,
@@ -236,6 +287,62 @@ class SODMatrix():
             return inception
 
 
+    def incepted_downsample(self, scope, X, K, S=2, padding='SAME', phase_train=None, summary=True, BN=True):
+        """
+        This function implements a downsampling layer that gives the network 3 options
+         for reducing parameter size, maxPool, avgPool or strided convolutions
+        :param scope:
+        :param X: Output of the previous layer
+        :param K: Feature maps in the inception layer (will be multiplied by 4 during concatenation)
+        :param S: The degree of downsampling or stride
+        :param padding:
+        :param phase_train: For batch norm implementation
+        :param summary: whether to produce a tensorboard summary of this layer
+        :param BN: whether to perform batch normalization
+        :return: the inception layer output after concat
+        """
+
+        # Implement an inception layer here ----------------
+        with tf.variable_scope(scope) as scope:
+
+            # First branch strided convolution
+            inception1 = self.convolution('Inception1', X, 3, K, S,
+                                          phase_train=phase_train, summary=False, BN=False, relu=False)
+
+            # Second branch, AVG pool
+            inception2 = tf.nn.avg_pool(X, [1, 3, 3, 1], [1, S, S, 1], padding)
+
+
+            # Third branch, max pool
+            inception3 = tf.nn.max_pool(X, [1, 3, 3, 1], [1, S, S, 1], padding)
+
+
+            # Concatenate the results
+            inception = tf.concat([tf.concat([inception1, inception2], axis=3),inception3], axis=3)
+
+            # Apply the batch normalization. Updates weights during training phase only
+            if BN:
+                inception = tf.cond(phase_train,
+                                   lambda: tf.contrib.layers.batch_norm(inception, activation_fn=None, center=True,
+                                                                        scale=True,
+                                                                        updates_collections=None, is_training=True,
+                                                                        reuse=None,
+                                                                        scope=scope, decay=0.9, epsilon=1e-5),
+                                   lambda: tf.contrib.layers.batch_norm(inception, activation_fn=None, center=True,
+                                                                        scale=True,
+                                                                        updates_collections=None, is_training=False,
+                                                                        reuse=True,
+                                                                        scope=scope, decay=0.9, epsilon=1e-5))
+
+            # Relu activation
+            inception = tf.nn.relu(inception, name=scope.name)
+
+            # Create a histogram/scalar summary of the conv1 layer
+            if summary: self._activation_summary(inception)
+
+            return inception
+
+
     def residual_layer(self, scope, X, F, K, padding='SAME', phase_train=None, summary=True, BN=True):
         """
         This is a wrapper for implementing a hybrid residual layer with inception layer as F(x)
@@ -276,7 +383,7 @@ class SODMatrix():
 
             # Apply the batch normalization. Updates weights during training phase only
             if BN:
-                norm = tf.cond(phase_train,
+                residual = tf.cond(phase_train,
                                lambda: tf.contrib.layers.batch_norm(residual, activation_fn=None, center=True, scale=True,
                                                             updates_collections=None, is_training=True, reuse=None,
                                                             scope=scope, decay=0.9, epsilon=1e-5),
@@ -285,7 +392,7 @@ class SODMatrix():
                                                             scope=scope, decay=0.9, epsilon=1e-5))
 
             # Relu activation
-            conv = tf.nn.relu(norm, name=scope.name)
+            conv = tf.nn.relu(residual, name=scope.name)
 
             # Create a histogram/scalar summary of the conv1 layer
             if summary: self._activation_summary(conv)
