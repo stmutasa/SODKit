@@ -217,13 +217,16 @@ class SODLoader():
         return return_dict
 
 
-    def load_NIFTY(self, path, reshape=True):
+    def load_NIFTY(self, path, reshape=True, shape=[]):
         """
         This function loads a .nii.gz file into a numpy array with dimensions Z, Y, X, C
         :param filename: path to the file
         :param reshape: whether to reshape the axis from/to ZYX
+        :param shape: If loading failed, uses another method that requires a shape to be defined
         :return:
         """
+
+        #try:
 
         # Load the data from the nifty file
         raw_data = nib.load(path)
@@ -231,6 +234,19 @@ class SODLoader():
         # Reshape the image data from NiB's XYZ to numpy's ZYXC
         if reshape: data = self.reshape_NHWC(raw_data.get_data(), False)
         else: data = raw_data.get_data()
+
+        # except:
+        #     # Try some other way of loading the data
+        #     array = np.zeros(shape, dtype=np.int16)
+        #
+        #     # Load into this array
+        #     raw_data = nib.Nifti1Image(array, np.eye(4))
+        #
+        #     # Reshape the image data from NiB's XYZ to numpy's ZYXC
+        #     if reshape:
+        #         data = self.reshape_NHWC(raw_data.get_data(), False)
+        #     else:
+        #         data = raw_data.get_data()
 
         # Return the data
         return data
@@ -662,7 +678,7 @@ class SODLoader():
         return scipy.interpolation.zoom(volume, resize_factor, mode='nearest')
 
 
-    def fast_3d_affine(self, image, angle_range=[]):
+    def fast_3d_affine(self, image, angle_range=[], shear_range=None):
 
         # The image is sent in Z,Y,X format
         Z, Y, X = image.shape
@@ -690,10 +706,37 @@ class SODLoader():
         M = cv2.getRotationMatrix2D((Y / 2, X / 2), anglez, 1)
         for i in range(0, Z): image[i, :, :] = cv2.warpAffine(image[i, :, :], M, (Y, X))
 
-        # Return the image to normal HU
-        image = np.subtract(image, img_min)
+        # Done with rotation, return if shear is not defined
+        if shear_range == None: return np.subtract(image, img_min), [anglex, angley, anglez]
 
-        return image, anglex, angley, anglez
+        # Shear defined, repeat everything for shearing
+
+        # Define the affine shear positions
+        sx = random.uniform(1-shear_range[0], 1+shear_range[0])
+        sy = random.uniform(1-shear_range[1], 1+shear_range[1])
+        sz = random.uniform(1-shear_range[2], 1+shear_range[2])
+
+        # Define starting points for saggital plane
+        pts1 = np.float32([[Y/2, Z/2], [Y/2, Z/3], [Y/3, Z/2]])
+        pts2 = np.float32([[sy*Y/2, sz*Z/2], [sy*Y/2, sz*Z/3], [sy*Y/3, sz*Z/2]])
+        M = cv2.getAffineTransform(pts1, pts2)
+
+        # Apply the saggital transform slice by slice along X
+        for i in range(0, X): image[:, :, i] = cv2.warpAffine(image[:, :, i], M, (Y, Z))
+
+        # Matrix to shear along Coronal plane (Z and X) and apply
+        pts1 = np.float32([[X / 2, Z / 2], [X / 2, Z / 3], [X / 3, Z / 2]])
+        pts2 = np.float32([[sx * X / 2, sz * Z / 2], [sx * X / 2, sz * Z / 3], [sx * X / 3, sz * Z / 2]])
+        M = cv2.getAffineTransform(pts1, pts2)
+        for i in range(0, Y): image[:, i, :] = cv2.warpAffine(image[:, i, :], M, (X, Z))
+
+        # # Matrix to shear along Axial plane (X and Y)
+        pts1 = np.float32([[Y / 2, X / 2], [Y / 2, X / 3], [Y / 3, X / 2]])
+        pts2 = np.float32([[sy * Y / 2, sx * X / 2], [sy * Y / 2, sx * X / 3], [sy * Y / 3, sx * X / 2]])
+        M = cv2.getAffineTransform(pts1, pts2)
+        for i in range(0, Z): image[i, :, :] = cv2.warpAffine(image[i, :, :], M, (Y, X))
+
+        return np.subtract(image, img_min), [anglex, angley, anglez], [sx, sy, sz]
 
 
     def affine_transform_data(self, data, tform, data_key=1):
