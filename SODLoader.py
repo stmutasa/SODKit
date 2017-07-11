@@ -739,6 +739,54 @@ class SODLoader():
         return np.subtract(image, img_min), [anglex, angley, anglez], [sx, sy, sz]
 
 
+    def calc_fast_affine(self, image, angle_range=[]):
+        """
+        This function returns 3 matrices that define affine rotations in 3D
+        :param image: 
+        :param angle_range: matrix of range of rotation along x, y and z
+        :return: array with the affine matrices
+        """
+
+        # The image is sent in Z,Y,X format
+        Z, Y, X = image.shape
+
+        # Define the affine angles of rotation
+        anglex = random.randrange(-angle_range[0], angle_range[0])
+        angley = random.randrange(-angle_range[1], angle_range[1])
+        anglez = random.randrange(-angle_range[2], angle_range[2])
+
+        # Matrix to rotate along saggital plane (Y columns, Z rows)
+        Mx = cv2.getRotationMatrix2D((Y / 2, Z / 2), anglex, 1)
+        My = cv2.getRotationMatrix2D((X / 2, Z / 2), angley, 1)
+        Mz = cv2.getRotationMatrix2D((Y / 2, X / 2), anglez, 1)
+
+        return [Mx, My, Mz]
+
+
+    def perform_fast_affine(self, image, M=[]):
+        """
+        This function applies an affnie transform using the given affine matrices
+        :param image: input volume
+        :param M: Affine matrices along x, y and z
+        :return: image
+        """
+
+        # The image is sent in Z,Y,X format
+        Z, Y, X = image.shape
+
+        # OpenCV makes interpolated pixels equal 0. Add the minumum value to subtract it later
+        img_min = abs(image.min())
+        image = np.add(image, img_min)
+
+        # Apply the Affine transforms slice by slice
+        for i in range(0, X): image[:, :, i] = cv2.warpAffine(image[:, :, i], M[0], (Y, Z))
+        for i in range(0, Y): image[:, i, :] = cv2.warpAffine(image[:, i, :], M[1], (X, Z))
+        for i in range(0, Z): image[i, :, :] = cv2.warpAffine(image[i, :, :], M[2], (Y, X))
+
+        # Return the array with normal houndsfield distribution
+        return np.subtract(image, img_min)
+
+
     def affine_transform_data(self, data, tform, data_key=1):
         """
         Method to augment data by affine transform and random offset.
@@ -859,6 +907,41 @@ class SODLoader():
     """
          Utility functions: Random tools for help
     """
+
+    def largest_blob(self, img):
+        """
+        This finds the biggest blob in a 2D or 3D volume and returns the center of the blob
+        :param img: the binary input volume
+        :return: img if no labels, labels if there is. and cn: an array with the center locations [x,y,z hopefully]
+        """
+
+        # Only work if a mask actually exists
+        if np.max(img) > 0:
+
+            # Labels all the blobs of connected pixels
+            labels = morphology.label(img)
+
+            # Counts the number of ocurences of each value, then returns the 2nd biggest blob (0 occurs the most)
+            N = np.bincount(labels.flatten())[1:].argmax() + 1
+
+            # Mark the blob
+            labels = (labels == N)
+
+            # Find the center of mass
+            cn = scipy.measurements.center_of_mass(labels)
+            cn = [int(cn[2]), int(cn[1]), int(cn[0])]
+
+            # Return the parts of the label equal to the 2nd biggest blob
+            return labels, cn
+
+        else:
+            return img
+
+
+    def normalize(self, input):
+        """ Normalizes the given np array"""
+        return (input - np.mean(input)) / np.std(input)
+
 
     def display_overlay(self, img, mask):
         """

@@ -281,8 +281,7 @@ class SODMatrix():
                                           phase_train=phase_train, summary=summary, BN=BN)  # 64x64x64
 
             # Concatenate the results for dimension of 64,64,256
-            inception = tf.concat([tf.concat([tf.concat([inception1, inception2], axis=3),
-                                              inception3], axis=3), inception4], axis=3)
+            inception = tf.concat([inception1, inception2, inception3, inception4], axis=3)
 
             return inception
 
@@ -305,20 +304,23 @@ class SODMatrix():
         # Implement an inception layer here ----------------
         with tf.variable_scope(scope) as scope:
 
+            # x: (-, 8, 8, k), strided: (-, 4, 4, k), avg: (-, 4, 4, k), max: (-, 4, 4, k), inc: (11, 4, 4, k*4)
+
             # First branch strided convolution
-            inception1 = self.convolution('Inception1', X, 3, K, S,
+            strided = self.convolution('IDS1', X, 2, K, S,
                                           phase_train=phase_train, summary=False, BN=False, relu=False)
 
-            # Second branch, AVG pool
-            inception2 = tf.nn.avg_pool(X, [1, 3, 3, 1], [1, S, S, 1], padding)
+            # 1x1 convolution to match filters
+            X = self.convolution('1by1', X, 1, K, 1, 'SAME', phase_train, summary, False, False)
 
+            # Second branch, AVG pool
+            avg = tf.nn.avg_pool(X, [1, 2, 2, 1], [1, S, S, 1], padding)
 
             # Third branch, max pool
-            inception3 = tf.nn.max_pool(X, [1, 3, 3, 1], [1, S, S, 1], padding)
-
+            max = tf.nn.max_pool(X, [1, 2, 2, 1], [1, S, S, 1], padding)
 
             # Concatenate the results
-            inception = tf.concat([tf.concat([inception1, inception2], axis=3),inception3], axis=3)
+            inception = tf.concat([tf.concat([strided, avg], axis=-1),max], axis=-1)
 
             # Apply the batch normalization. Updates weights during training phase only
             if BN:
@@ -365,18 +367,20 @@ class SODMatrix():
         with tf.variable_scope(scope) as scope:
 
             # The first layer is an inception layer
-            conv1 = self.inception_layer(scope, X, K, 1, phase_train=phase_train)
+            conv1 = self.inception_layer(scope, X, K/8, 1, phase_train=phase_train)
+
+            # Set channel size based on input depth
+            #C = conv1.get_shape().as_list()[3]
 
             # Define the Kernel for conv2. Which is a normal conv layer
-            kernel = tf.get_variable('Weights', shape=[F, F, C, K * 4],
+            kernel = tf.get_variable('Weights', shape=[F, F, C, K],
                                      initializer=tf.contrib.layers.xavier_initializer())
 
             # Add this kernel to the weights collection for L2 reg
             tf.add_to_collection('weights', kernel)
 
             # Perform the actual convolution
-            conv2 = tf.nn.conv2d(conv1, kernel, [1, 1, 1, 1],
-                                 padding=padding)  # Create a 2D tensor with BATCH_SIZE rows
+            conv2 = tf.nn.conv2d(conv1, kernel, [1, 1, 1, 1], padding=padding)
 
             # Add in the residual here
             residual = tf.add(conv2, X)
@@ -392,15 +396,16 @@ class SODMatrix():
                                                             scope=scope, decay=0.9, epsilon=1e-5))
 
             # Relu activation
-            if relu: conv = tf.nn.relu(residual, name=scope.name)
+            if relu: residual = tf.nn.relu(residual, name=scope.name)
 
             # Create a histogram/scalar summary of the conv1 layer
-            if summary: self._activation_summary(conv)
+            if summary: self._activation_summary(residual)
 
-            return conv
+            return residual
 
 
-    def residual_layer(self, scope, X, F, K, K_prob, padding='SAME', phase_train=None, summary=True):
+    def residual_layer(self, scope, X, F, K, K_prob=None, padding='SAME',
+                       phase_train=None, summary=True, DSC=False, BN=False, relu=False):
         """
         This is a wrapper for implementing a stanford style residual layer
         :param scope:
@@ -411,6 +416,9 @@ class SODMatrix():
         :param padding: SAME or VALID
         :param phase_train: For batch norm implementation
         :param summary: whether to produce a tensorboard summary of this layer
+        :param DSC: Whether to perform standard downsample or incepted downsample
+        :param BN: Whether to batch norm. Defaults to false to plug into another residual
+        :param relu: whether to apply a nonlinearity at the end.
         :return:
         """
 
@@ -424,22 +432,44 @@ class SODMatrix():
             conv1 = tf.nn.relu(conv1, scope.name)
 
             # Dropout
-            conv1 = tf.nn.dropout(conv1, K_prob)
+            if K_prob: conv1 = tf.nn.dropout(conv1, K_prob)
 
             # Another Convolution with BN and ReLu
-            conv2 = self.convolution(scope, conv1, F, K, 1, 'SAME', phase_train, summary, True, True)
+            conv2 = self.convolution('Conv2', conv1, F, K, 1, 'SAME', phase_train, summary, True, True)
 
             # Second dropout
-            conv2 = tf.nn.dropout(conv2, K_prob)
+            if K_prob: conv2 = tf.nn.dropout(conv2, K_prob)
 
             # Final STRIDED conv without BN or RELU
-            conv = self.convolution(scope, conv2, F, K, 2, 'SAME', phase_train, summary, False, False)
+            if DSC: conv = self.incepted_downsample('ConvFinal', conv2, K, 2, 'SAME', phase_train, summary, False, False)
+            else: conv = self.convolution('ConvFinal', conv2, F, K, 2, 'SAME', phase_train, summary, False, False)
+
+            # 1x1 convolution to match filters
+            if DSC: X = self.convolution('1by1', X, 1, K*3, 1, 'SAME', phase_train, summary, False, False)
+            else: X = self.convolution('1by1', X, 1, K, 1, 'SAME', phase_train, summary, False, False)
 
             # Max pool of the input convolution
             pool = tf.nn.max_pool(X, [1, F, F, 1], [1, 2, 2, 1], padding)
 
             # The Residual block
             residual = tf.add(conv, pool)
+
+            # Apply the batch normalization. Updates weights during training phase only
+            if BN:
+                residual = tf.cond(phase_train,
+                                   lambda: tf.contrib.layers.batch_norm(residual, activation_fn=None, center=True,
+                                                                        scale=True,
+                                                                        updates_collections=None, is_training=True,
+                                                                        reuse=None,
+                                                                        scope='BNRes', decay=0.9, epsilon=1e-5),
+                                   lambda: tf.contrib.layers.batch_norm(residual, activation_fn=None, center=True,
+                                                                        scale=True,
+                                                                        updates_collections=None, is_training=False,
+                                                                        reuse=True,
+                                                                        scope='BNRes', decay=0.9, epsilon=1e-5))
+
+            # Relu activation
+            if relu: residual = tf.nn.relu(residual, name=scope.name)
 
             return residual
 
@@ -579,7 +609,7 @@ class SODMatrix():
             B2 = tf.Variable(initial_value=initial, name='Bias2')
 
             # Define the two layers of the localisation network
-            H1 = tf.nn.tanh(tf.matmul(tf.zeros([batch_size, 16 * 16 * 128]), W1) + B1)
+            H1 = tf.nn.tanh(tf.matmul(tf.zeros([batch_size, dim * dim * 128]), W1) + B1)
             H2 = tf.nn.tanh(tf.matmul(H1, W2) + B2)
 
             # Define the output size to the original dimensions
@@ -593,7 +623,7 @@ class SODMatrix():
          Loss function wrappers
     """
 
-    def segmentation_SCE_loss(self, logits, labelz, class_factor=1, summary=True):
+    def segmentation_SCE_loss(self, logits, labelz, class_factor=1.2, summary=True):
         """
         Calculates cross entropy for a segmentation type network. Made for Unet segmentation of lung nodules
         :param logits: logits from the forward pass. (batch, H, W, 1)
@@ -706,7 +736,7 @@ class SODMatrix():
         # Calculate  loss
         loss = tf.nn.softmax_cross_entropy_with_logits(labels=tf.squeeze(labels), logits=logits)
 
-        # # Add the loss factor
+        # Multiply the loss factor
         loss = tf.multiply(loss, tf.squeeze(lesion_mask))
 
         # Reduce to scalar
