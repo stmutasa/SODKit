@@ -671,14 +671,22 @@ class SODLoader():
         """
 
         # Define the resize matrix
-        resize_factor = [factor[0] / volume.shape[0], factor[1] / volume.shape[1],
-                         factor[2] / volume.shape[2]]
+        resize_factor = [factor[0] * volume.shape[0], factor[1] * volume.shape[1],
+                         factor[2] * volume.shape[2]]
 
         # Perform the zoom
         return scipy.interpolation.zoom(volume, resize_factor, mode='nearest')
 
 
-    def fast_3d_affine(self, image, angle_range=[], shear_range=None):
+    def fast_3d_affine(self, image, center, angle_range, shear_range=None):
+        """
+        Performs a 3D affine rotation and/or shear using OpenCV
+        :param image: The image volume
+        :param center: array: the center of rotation (make this the nodule center) in z,y,x
+        :param angle_range: array: range of angles about x, y and z
+        :param shear_range: float array: the range of values to shear if you want to shear
+        :return:
+        """
 
         # The image is sent in Z,Y,X format
         Z, Y, X = image.shape
@@ -688,22 +696,22 @@ class SODLoader():
         image = np.add(image, img_min)
 
         # Define the affine angles of rotation
-        anglex = random.randrange(-angle_range[0], angle_range[0])
+        anglex = random.randrange(-angle_range[2], angle_range[2])
         angley = random.randrange(-angle_range[1], angle_range[1])
-        anglez = random.randrange(-angle_range[2], angle_range[2])
+        anglez = random.randrange(-angle_range[0], angle_range[0])
 
-        # Matrix to rotate along saggital plane (Y columns, Z rows)
-        M = cv2.getRotationMatrix2D((Y / 2, Z / 2), anglex, 1)
+        # Matrix to rotate along Coronal plane (Y columns, Z rows)
+        M = cv2.getRotationMatrix2D((center[1], center[0]), anglex, 1)
 
-        # Apply the saggital transform slice by slice along X
+        # Apply the Coronal transform slice by slice along X
         for i in range(0, X): image[:, :, i] = cv2.warpAffine(image[:, :, i], M, (Y, Z))
 
-        # Matrix to rotate along Coronal plane (Z and X) and apply
-        M = cv2.getRotationMatrix2D((X / 2, Z / 2), angley, 1)
+        # Matrix to rotate along saggital plane (Z and X) and apply
+        M = cv2.getRotationMatrix2D((center[2], center[0]), angley, 1)
         for i in range(0, Y): image[:, i, :] = cv2.warpAffine(image[:, i, :], M, (X, Z))
 
-        # # Matrix to rotate along Axial plane (X and Y)
-        M = cv2.getRotationMatrix2D((Y / 2, X / 2), anglez, 1)
+        # Matrix to rotate along Axial plane (X and Y)
+        M = cv2.getRotationMatrix2D((center[1], center[2]), anglez, 1)
         for i in range(0, Z): image[i, :, :] = cv2.warpAffine(image[i, :, :], M, (Y, X))
 
         # Done with rotation, return if shear is not defined
@@ -712,29 +720,38 @@ class SODLoader():
         # Shear defined, repeat everything for shearing
 
         # Define the affine shear positions
-        sx = random.uniform(1-shear_range[0], 1+shear_range[0])
-        sy = random.uniform(1-shear_range[1], 1+shear_range[1])
-        sz = random.uniform(1-shear_range[2], 1+shear_range[2])
+        sx = random.uniform(0-shear_range[2], 0+shear_range[2])
+        sy = random.uniform(0-shear_range[1], 0+shear_range[1])
+        sz = random.uniform(0-shear_range[0], 0+shear_range[0])
 
-        # Define starting points for saggital plane
-        pts1 = np.float32([[Y/2, Z/2], [Y/2, Z/3], [Y/3, Z/2]])
-        pts2 = np.float32([[sy*Y/2, sz*Z/2], [sy*Y/2, sz*Z/3], [sy*Y/3, sz*Z/2]])
-        M = cv2.getAffineTransform(pts1, pts2)
-
-        # Apply the saggital transform slice by slice along X
-        for i in range(0, X): image[:, :, i] = cv2.warpAffine(image[:, :, i], M, (Y, Z))
-
-        # Matrix to shear along Coronal plane (Z and X) and apply
+        # First define 3 random points
         pts1 = np.float32([[X / 2, Z / 2], [X / 2, Z / 3], [X / 3, Z / 2]])
-        pts2 = np.float32([[sx * X / 2, sz * Z / 2], [sx * X / 2, sz * Z / 3], [sx * X / 3, sz * Z / 2]])
-        M = cv2.getAffineTransform(pts1, pts2)
+
+        # Then define a custom 3x3 affine matrix
+        M = np.array([[1.0, sx, 0], [sz, 1.0, 0], [0, 0, 1.0]], dtype=np.float32)
+
+        # Now retreive the affine matrix that OpenCV uses
+        M = cv2.getAffineTransform(pts1, np.dot(M, pts1))
+
+        # Apply the transformation slice by slice
         for i in range(0, Y): image[:, i, :] = cv2.warpAffine(image[:, i, :], M, (X, Z))
 
-        # # Matrix to shear along Axial plane (X and Y)
+        # Garbage collections
+        del pts1
+
+        # Repeat and Apply the saggital transform slice by slice along X
+        pts1 = np.float32([[Y / 2, Z / 2], [Y / 2, Z / 3], [Y / 3, Z / 2]])
+        M = np.array([[1.0, sy, 0], [sz, 1.0, 0], [0, 0, 1.0]], dtype=np.float32)
+        M = cv2.getAffineTransform(pts1, np.dot(M, pts1))
+        for i in range(0, X): image[:, :, i] = cv2.warpAffine(image[:, :, i], M, (Y, Z))
+        del pts1
+
+        # Repeat and Apply the Coronal transform slice by slice along y
         pts1 = np.float32([[Y / 2, X / 2], [Y / 2, X / 3], [Y / 3, X / 2]])
-        pts2 = np.float32([[sy * Y / 2, sx * X / 2], [sy * Y / 2, sx * X / 3], [sy * Y / 3, sx * X / 2]])
-        M = cv2.getAffineTransform(pts1, pts2)
+        M = np.array([[1.0, sy, 0], [sx, 1.0, 0], [0, 0, 1.0]], dtype=np.float32)
+        M = cv2.getAffineTransform(pts1, np.dot(M, pts1))
         for i in range(0, Z): image[i, :, :] = cv2.warpAffine(image[i, :, :], M, (Y, X))
+        del pts1
 
         return np.subtract(image, img_min), [anglex, angley, anglez], [sx, sy, sz]
 
@@ -830,27 +847,30 @@ class SODLoader():
         return data
 
 
-    def generate_box(self, image, origin=[], size=32):
+    def generate_box(self, image, origin=[], size=32, display=False):
         """
         This function returns a cube from the source image
         :param image: The source image
-        :param origin: Center of the cube as a matrix of x,y,z
+        :param origin: Center of the cube as a matrix of x,y,z [z, y, x]
         :param size: dimensions of the cube in mm
         :return: cube: the cube itself
         """
 
+        # first scale the z axis in half
+        sizez = int(size/2)
+
         # Make the starting point = center-size unless near the edge then make it 0
-        startx = max(origin[0] - size/2, 0)
+        startx = max(origin[2] - size/2, 0)
         starty = max(origin[1] - size/2, 0)
-        startz = max(origin[2] - size/2, 0)
+        startz = max(origin[0] - sizez/2, 0)
 
         # If near the far edge, make it fit inside the image
-        if startx + size > image.shape[2]:
+        if (startx + size) > image.shape[2]:
             startx = image.shape[2] - size
-        if starty + size > image.shape[1]:
+        if (starty + size) > image.shape[1]:
             starty = image.shape[1] - size
-        if startz + size > image.shape[0]:
-            startz = image.shape[0] - size
+        if (startz + sizez) > image.shape[0]:
+            startz = image.shape[0] - sizez
 
         # Convert to integers
         startx = int(startx)
@@ -858,9 +878,17 @@ class SODLoader():
         startz = int(startz)
 
         # Now retreive the box
-        box = image[startz:startz + size, starty:starty + size, startx:startx + size]
+        box = image[startz:startz + sizez, starty:starty + size, startx:startx + size]
 
-        return box
+        # If boxes had to be shifted, we have to calculate a new 'center' of the nodule in the box
+        new_center = [int(sizez/2 - ((startz+sizez/2) - origin[0])),
+                      int(size/2 - ((starty+size/2) - origin[1])),
+                      int(size / 2 - ((starty + size / 2) - origin[1]))]
+
+        # display if wanted
+        if display: print(image.shape, startz, starty, startx, box.shape, 'New Center:', new_center)
+
+        return box, new_center
 
 
     def generate_DRR(self, volume_data, parameters):
@@ -908,11 +936,11 @@ class SODLoader():
          Utility functions: Random tools for help
     """
 
-    def largest_blob(self, img):
+    def largest_blob(self, img, vol=None):
         """
         This finds the biggest blob in a 2D or 3D volume and returns the center of the blob
         :param img: the binary input volume
-        :return: img if no labels, labels if there is. and cn: an array with the center locations [x,y,z hopefully]
+        :return: img if no labels, labels if there is. and cn: an array with the center locations [z, y, x]
         """
 
         # Only work if a mask actually exists
@@ -929,7 +957,7 @@ class SODLoader():
 
             # Find the center of mass
             cn = scipy.measurements.center_of_mass(labels)
-            cn = [int(cn[2]), int(cn[1]), int(cn[0])]
+            cn = [int(cn[0]), int(cn[1]), int(cn[2])]
 
             # Return the parts of the label equal to the 2nd biggest blob
             return labels, cn
@@ -938,8 +966,25 @@ class SODLoader():
             return img
 
 
-    def normalize(self, input):
-        """ Normalizes the given np array"""
+    def normalize(self, input, crop=False, crop_val=0.5):
+        """
+        Normalizes the given np array
+        :param input:
+        :param crop: whether to crop the values
+        :param crop_val: the percentage to crop the image
+        :return:
+        """
+
+        if crop:
+
+            ## CLIP top and bottom x values and scale rest of slice accordingly
+            b, t = np.percentile(input, (crop_val, 100-crop_val))
+            slice = np.clip(input, b, t)
+            if np.std(slice) == 0:
+                return slice
+            else:
+                return (slice - np.mean(slice)) / np.std(slice)
+
         return (input - np.mean(input)) / np.std(input)
 
 
