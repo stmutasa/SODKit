@@ -156,8 +156,10 @@ class SODLoader():
         # Retreive the dimensions of the scan
         dims = np.array([int(ndimage.Columns), int(ndimage.Rows)])
 
-        # Retreive the window level
-        window = [int(ndimage.WindowCenter), int(ndimage.WindowWidth)]
+        try:
+            # Retreive the window level
+            window = [int(ndimage.WindowCenter), int(ndimage.WindowWidth)]
+        except: window = None
 
         # Retreive the dummy accession number
         accno = int(ndimage.AccessionNumber)
@@ -847,14 +849,41 @@ class SODLoader():
         return data
 
 
-    def generate_box(self, image, origin=[], size=32, display=False):
+    def generate_box(self, image, origin=[], size=32, display=False, dim3d=True):
         """
         This function returns a cube from the source image
         :param image: The source image
         :param origin: Center of the cube as a matrix of x,y,z [z, y, x]
         :param size: dimensions of the cube in mm
+        :param dim3d: Whether this is 3D or 2D
         :return: cube: the cube itself
         """
+
+        # First implement the 2D version
+        if not dim3d:
+
+            # Make the starting point = center-size unless near the edge then make it 0
+            startx = max(origin[1] - size / 2, 0)
+            starty = max(origin[0] - size / 2, 0)
+
+            # If near the far edge, make it fit inside the image
+            if (startx + size) > image.shape[1]:
+                startx = image.shape[1] - size
+            if (starty + size) > image.shape[0]:
+                starty = image.shape[0] - size
+
+            # Convert to integers
+            startx = int(startx)
+            starty = int(starty)
+
+            # Now retreive the box
+            box = image[starty:starty + size, startx:startx + size]
+
+            # If boxes had to be shifted, we have to calculate a new 'center' of the nodule in the box
+            new_center = [int(size / 2 - ((starty + size / 2) - origin[1])),
+                          int(size / 2 - ((startx + size / 2) - origin[1]))]
+
+            return box, new_center
 
         # first scale the z axis in half
         sizez = int(size/2)
@@ -957,7 +986,9 @@ class SODLoader():
 
             # Find the center of mass
             cn = scipy.measurements.center_of_mass(labels)
-            cn = [int(cn[0]), int(cn[1]), int(cn[2])]
+
+            if labels.ndim == 3: cn = [int(cn[0]), int(cn[1]), int(cn[2])]
+            else: cn = [int(cn[0]), int(cn[1])]
 
             # Return the parts of the label equal to the 2nd biggest blob
             return labels, cn
