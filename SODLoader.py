@@ -348,7 +348,6 @@ class SODLoader():
         return patient, label, id, phase
 
 
-
     """
              Pre processing functions.
     """
@@ -910,9 +909,9 @@ class SODLoader():
         box = image[startz:startz + sizez, starty:starty + size, startx:startx + size]
 
         # If boxes had to be shifted, we have to calculate a new 'center' of the nodule in the box
-        new_center = [int(sizez/2 - ((startz+sizez/2) - origin[0])),
-                      int(size/2 - ((starty+size/2) - origin[1])),
-                      int(size / 2 - ((starty + size / 2) - origin[1]))]
+        new_center = [int(sizez/ 2 - ((startz + sizez/ 2) - origin[0])),
+                      int(size / 2 - ((starty + size / 2) - origin[1])),
+                      int(size / 2 - ((startx + size / 2) - origin[2]))]
 
         # display if wanted
         if display: print(image.shape, startz, starty, startx, box.shape, 'New Center:', new_center)
