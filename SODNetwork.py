@@ -41,7 +41,7 @@ class SODMatrix():
         """
 
         # Set channel size based on input depth
-        C = X.get_shape().as_list()[3]
+        C = X.get_shape().as_list()[-1]
 
         # Set the scope
         with tf.variable_scope(scope) as scope:
@@ -475,7 +475,7 @@ class SODMatrix():
 
 
     def _activation_summary(self, x):
-        """ 
+        """
         Helper to create summaries for activations
             Creates a summary to measure the proportion of your W in x that is all zero
             Parameters: x = a tensor
@@ -491,7 +491,7 @@ class SODMatrix():
         return
 
 
-    def fc7_layer(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5, summary=True):
+    def fc7_layer(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5, summary=True, BN=False):
         """
         Wrapper for implementing a fully connected layer
         :param scope: Scopename of the layer
@@ -527,7 +527,10 @@ class SODMatrix():
             biases = tf.Variable(np.ones(neurons), name='Bias', dtype=tf.float32)
 
             # Do the math
-            fc7 = tf.nn.relu(tf.matmul(reshape, weights) + biases, name=scope.name)
+            # Do the math
+            fc7 = tf.matmul(reshape, weights)
+            if BN: fc7 = self.batch_normalization(fc7, phase_train, 'Fc7Norm')
+            fc7 = tf.nn.relu(fc7 + biases, name=scope.name)
 
             # Dropout here if wanted and in train phase
             if phase_train and dropout: fc7 = tf.nn.dropout(fc7, keep_prob)
