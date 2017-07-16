@@ -708,11 +708,8 @@ class SODLoader():
         # Convert to float
         image = image.astype(np.float32)
 
-        # Expand dimensions if there is no channel dimensions
-        if image.ndim < 4: image = np.expand_dims(image, -1)
-
         # The image is sent in Z,Y,X format
-        Z, Y, X, C = image.shape
+        Z, Y, X = image.shape[0], image.shape[1], image.shape[2]
 
         # OpenCV makes interpolated pixels equal 0. Add the minumum value to subtract it later
         img_min = abs(image.min())
@@ -727,15 +724,15 @@ class SODLoader():
         M = cv2.getRotationMatrix2D((center[1], center[0]), anglex, 1)
 
         # Apply the Coronal transform slice by slice along X
-        for i in range(0, X): image[:, :, i, :] = cv2.warpAffine(image[:, :, i, :], M, (Y, Z))
+        for i in range(0, X): image[:, :, i] = cv2.warpAffine(image[:, :, i], M, (Y, Z))
 
         # Matrix to rotate along saggital plane (Z and X) and apply
         M = cv2.getRotationMatrix2D((center[2], center[0]), angley, 1)
-        for i in range(0, Y): image[:, i, :, :] = cv2.warpAffine(image[:, i, :, :], M, (X, Z))
+        for i in range(0, Y): image[:, i, :] = cv2.warpAffine(image[:, i, :], M, (X, Z))
 
         # Matrix to rotate along Axial plane (X and Y)
         M = cv2.getRotationMatrix2D((center[1], center[2]), anglez, 1)
-        for i in range(0, Z): image[i, :, :, :] = cv2.warpAffine(image[i, :, :, :], M, (Y, X))
+        for i in range(0, Z): image[i, :, :] = cv2.warpAffine(image[i, :, :], M, (Y, X))
 
         # Done with rotation, return if shear is not defined
         if shear_range == None: return np.subtract(image, img_min), [anglex, angley, anglez]
@@ -757,7 +754,7 @@ class SODLoader():
         M = cv2.getAffineTransform(pts1, np.dot(M, pts1))
 
         # Apply the transformation slice by slice
-        for i in range(0, Y): image[:, i, :, :] = cv2.warpAffine(image[:, i, :, :], M, (X, Z))
+        for i in range(0, Y): image[:, i, :] = cv2.warpAffine(image[:, i, :], M, (X, Z))
 
         # Garbage collections
         del pts1
@@ -766,14 +763,14 @@ class SODLoader():
         pts1 = np.float32([[Y / 2, Z / 2], [Y / 2, Z / 3], [Y / 3, Z / 2]])
         M = np.array([[1.0, sy, 0], [sz, 1.0, 0], [0, 0, 1.0]], dtype=np.float32)
         M = cv2.getAffineTransform(pts1, np.dot(M, pts1))
-        for i in range(0, X): image[:, :, i, :] = cv2.warpAffine(image[:, :, i, :], M, (Y, Z))
+        for i in range(0, X): image[:, :, i] = cv2.warpAffine(image[:, :, i], M, (Y, Z))
         del pts1
 
         # Repeat and Apply the Coronal transform slice by slice along y
         pts1 = np.float32([[Y / 2, X / 2], [Y / 2, X / 3], [Y / 3, X / 2]])
         M = np.array([[1.0, sy, 0], [sx, 1.0, 0], [0, 0, 1.0]], dtype=np.float32)
         M = cv2.getAffineTransform(pts1, np.dot(M, pts1))
-        for i in range(0, Z): image[i, :, :, :] = cv2.warpAffine(image[i, :, :, :], M, (Y, X))
+        for i in range(0, Z): image[i, :, :] = cv2.warpAffine(image[i, :, :], M, (Y, X))
         del pts1
 
         return np.subtract(image, img_min), [anglex, angley, anglez], [sx, sy, sz]
