@@ -292,6 +292,22 @@ class SODLoader():
             image = mpimg.imread(path)
 
         return image
+    
+
+    def load_tiff(self, filename):
+        """
+        Loads a .tif image into a numpy array
+        :param filename: file name on disc
+        :return: The image
+        """
+
+        # Load the image
+        image = plt.imread(filename)
+
+        # Reverse image dimensions
+        image = np.moveaxis(image, -1, 0)
+
+        return image
 
 
     def load_HA_labels(self, filename):
