@@ -705,6 +705,12 @@ class SODLoader():
         :return:
         """
 
+        # Convert to float
+        image = image.astype(np.float32)
+
+        # Expand dimensions if there is no channel dimensions
+        if image.ndim < 4: image = np.expand_dims(image, -1)
+
         # The image is sent in Z,Y,X format
         Z, Y, X, C = image.shape
 
