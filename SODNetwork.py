@@ -240,7 +240,7 @@ class SODMatrix():
             return conv
 
 
-    def inception_layer(self, scope, X, K, S=1, padding='SAME', phase_train=None, summary=True, BN=True):
+    def inception_layer(self, scope, X, K, S=1, padding='SAME', phase_train=None, summary=True, BN=True, relu=True):
         """
         This function implements an inception layer or "network within a network"
         :param scope:
@@ -258,30 +258,30 @@ class SODMatrix():
         with tf.variable_scope(scope) as scope:
             # First branch, 1x1x64 convolution
             inception1 = self.convolution('Inception1', X, 1, K, S,
-                                          phase_train=phase_train, summary=summary, BN=BN)  # 64x64x64
+                                          phase_train=phase_train, summary=summary, BN=BN, relu=relu)  # 64x64x64
 
             # Second branch, 1x1 convolution then 3x3 convolution
             inception2a = self.convolution('Inception2a', X, 1, 1, 1,
-                                           phase_train=phase_train, summary=summary, BN=BN)  # 64x64x1
+                                           phase_train=phase_train, summary=summary)  # 64x64x1
 
             inception2 = self.convolution('Inception2', inception2a, 3, K, S,
-                                          phase_train=phase_train, summary=summary, BN=BN)  # 64x64x64
+                                          phase_train=phase_train, summary=summary, BN=BN, relu=relu)  # 64x64x64
 
             # Third branch, 1x1 convolution then 5x5 convolution:
             inception3a = self.convolution('Inception3a', X, 1, 1, 1,
-                                           phase_train=phase_train, summary=summary, BN=BN)  # 64x64x1
+                                           phase_train=phase_train, summary=summary)  # 64x64x1
 
             inception3 = self.convolution('Inception3', inception3a, 5, K, S,
-                                          phase_train=phase_train, summary=summary, BN=BN)  # 64x64x64
+                                          phase_train=phase_train, summary=summary, BN=BN, relu=relu)  # 64x64x64
 
             # Fourth branch, max pool then 1x1 conv:
             inception4a = tf.nn.max_pool(X, [1, 3, 3, 1], [1, 1, 1, 1], padding)  # 64x64x256
 
             inception4 = self.convolution('Inception4', inception4a, 1, K, S,
-                                          phase_train=phase_train, summary=summary, BN=BN)  # 64x64x64
+                                          phase_train=phase_train, summary=summary, BN=BN, relu=relu)  # 64x64x64
 
             # Concatenate the results for dimension of 64,64,256
-            inception = tf.concat([inception1, inception2, inception3, inception4], axis=3)
+            inception = tf.concat([inception1, inception2, inception3, inception4], -1)
 
             return inception
 
@@ -404,7 +404,7 @@ class SODMatrix():
             return residual
 
 
-    def residual_layer(self, scope, X, F, K, K_prob=None, padding='SAME',
+    def residual_layer(self, scope, X, F, K, S=2, K_prob=None, padding='SAME',
                        phase_train=None, summary=True, DSC=False, BN=False, relu=False):
         """
         This is a wrapper for implementing a stanford style residual layer
@@ -412,6 +412,7 @@ class SODMatrix():
         :param X: Output of the previous layer, make sure this is not normalized and has no nonlinearity applied
         :param F: Dimensions of the second convolution in F(x) - the non inception layer one
         :param K: Feature maps in the inception layer (will be multiplied by 4 during concatenation)
+        :param S: Stride of the convolution, whether to downsample
         :param k_prob: keep probability for dropout
         :param padding: SAME or VALID
         :param phase_train: For batch norm implementation
@@ -441,15 +442,15 @@ class SODMatrix():
             if K_prob: conv2 = tf.nn.dropout(conv2, K_prob)
 
             # Final STRIDED conv without BN or RELU
-            if DSC: conv = self.incepted_downsample('ConvFinal', conv2, K, 2, 'SAME', phase_train, summary, False, False)
-            else: conv = self.convolution('ConvFinal', conv2, F, K, 2, 'SAME', phase_train, summary, False, False)
+            if DSC: conv = self.incepted_downsample('ConvFinal', conv2, K, S, 'SAME', phase_train, summary, False, False)
+            else: conv = self.convolution('ConvFinal', conv2, F, K, S, 'SAME', phase_train, summary, False, False)
 
             # 1x1 convolution to match filters
             if DSC: X = self.convolution('1by1', X, 1, K*3, 1, 'SAME', phase_train, summary, False, False)
             else: X = self.convolution('1by1', X, 1, K, 1, 'SAME', phase_train, summary, False, False)
 
             # Max pool of the input convolution
-            pool = tf.nn.max_pool(X, [1, F, F, 1], [1, 2, 2, 1], padding)
+            pool = tf.nn.max_pool(X, [1, F, F, 1], [1, S, S, 1], padding)
 
             # The Residual block
             residual = tf.add(conv, pool)
@@ -527,7 +528,6 @@ class SODMatrix():
             biases = tf.Variable(np.ones(neurons), name='Bias', dtype=tf.float32)
 
             # Do the math
-            # Do the math
             fc7 = tf.matmul(reshape, weights)
             if BN: fc7 = self.batch_normalization(fc7, phase_train, 'Fc7Norm')
             fc7 = tf.nn.relu(fc7 + biases, name=scope.name)
@@ -541,7 +541,7 @@ class SODMatrix():
             return fc7
 
 
-    def linear_layer(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5, summary=True):
+    def linear_layer(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5, summary=True, BN=False):
         """
         Wrapper for implementing a fully connected layer
         :param scope: Scopename of the layer
@@ -571,7 +571,10 @@ class SODMatrix():
             biases = tf.Variable(np.ones(neurons), name='Bias', dtype=tf.float32)
 
             # Do the math
-            linear = tf.nn.relu(tf.matmul(X, weights) + biases, name=scope.name)
+            # Do the math
+            linear = tf.matmul(X, weights)
+            if BN: linear = self.batch_normalization(linear, phase_train, 'LinearNorm')
+            linear = tf.nn.relu(linear + biases, name=scope.name)
 
             # Dropout here if wanted and in train phase
             if phase_train and dropout: linear = tf.nn.dropout(linear, keep_prob)

@@ -14,6 +14,7 @@ import nibabel as nib
 import tensorflow as tf
 import SimpleITK as sitk
 import scipy.ndimage as scipy
+import scipy.misc as misc
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 
@@ -663,20 +664,35 @@ class SODLoader():
         return image, new_spacing
 
 
-    def zoom_3D(self, volume, factor):
+    def zoom_3D(self, volume, new_shape, center=None):
         """
         Uses scipy to zoom a 3D volume to a new shape
-        :param volume:
-        :param factor:
+        :param volume: input volume
+        :param new_shape: array: the new shape to resize to
         :return:
         """
 
-        # Define the resize matrix
-        resize_factor = [factor[0] * volume.shape[0], factor[1] * volume.shape[1],
-                         factor[2] * volume.shape[2]]
+        # Calculate the resize factor
+        factor = [new_shape[0]/volume.shape[0], new_shape[1]/volume.shape[1], new_shape[2] / volume.shape[2]]
 
-        # Perform the zoom
-        return scipy.interpolation.zoom(volume, resize_factor, mode='nearest')
+        # Perform channel by channel resizing
+        resize1 = []
+        resize1.append(scipy.zoom(volume[:, :, :, 0], factor, order=3))
+        resize1.append(scipy.zoom(volume[:, :, :, 1], factor, order=3))
+        resize1.append(scipy.zoom(volume[:, :, :, 2], factor, order=3))
+
+        # Now re concatenate the arrays
+        resize = np.zeros(shape=new_shape, dtype=np.float32)
+        for z in range(3): resize[:, :, :, z] = resize1[z]
+
+        # Calculate a new center:
+        if center:
+            new_center = [int(center[0]*new_shape[0]/volume.shape[0]), int(center[1]*new_shape[1]/volume.shape[1]),
+                          int(center[2] * new_shape[2] / volume.shape[2])]
+
+            return resize, new_center
+
+        return resize
 
 
     def fast_3d_affine(self, image, center, angle_range, shear_range=None):
@@ -690,7 +706,7 @@ class SODLoader():
         """
 
         # The image is sent in Z,Y,X format
-        Z, Y, X = image.shape
+        Z, Y, X, C = image.shape
 
         # OpenCV makes interpolated pixels equal 0. Add the minumum value to subtract it later
         img_min = abs(image.min())
@@ -705,15 +721,15 @@ class SODLoader():
         M = cv2.getRotationMatrix2D((center[1], center[0]), anglex, 1)
 
         # Apply the Coronal transform slice by slice along X
-        for i in range(0, X): image[:, :, i] = cv2.warpAffine(image[:, :, i], M, (Y, Z))
+        for i in range(0, X): image[:, :, i, :] = cv2.warpAffine(image[:, :, i, :], M, (Y, Z))
 
         # Matrix to rotate along saggital plane (Z and X) and apply
         M = cv2.getRotationMatrix2D((center[2], center[0]), angley, 1)
-        for i in range(0, Y): image[:, i, :] = cv2.warpAffine(image[:, i, :], M, (X, Z))
+        for i in range(0, Y): image[:, i, :, :] = cv2.warpAffine(image[:, i, :, :], M, (X, Z))
 
         # Matrix to rotate along Axial plane (X and Y)
         M = cv2.getRotationMatrix2D((center[1], center[2]), anglez, 1)
-        for i in range(0, Z): image[i, :, :] = cv2.warpAffine(image[i, :, :], M, (Y, X))
+        for i in range(0, Z): image[i, :, :, :] = cv2.warpAffine(image[i, :, :, :], M, (Y, X))
 
         # Done with rotation, return if shear is not defined
         if shear_range == None: return np.subtract(image, img_min), [anglex, angley, anglez]
@@ -735,7 +751,7 @@ class SODLoader():
         M = cv2.getAffineTransform(pts1, np.dot(M, pts1))
 
         # Apply the transformation slice by slice
-        for i in range(0, Y): image[:, i, :] = cv2.warpAffine(image[:, i, :], M, (X, Z))
+        for i in range(0, Y): image[:, i, :, :] = cv2.warpAffine(image[:, i, :, :], M, (X, Z))
 
         # Garbage collections
         del pts1
@@ -744,14 +760,14 @@ class SODLoader():
         pts1 = np.float32([[Y / 2, Z / 2], [Y / 2, Z / 3], [Y / 3, Z / 2]])
         M = np.array([[1.0, sy, 0], [sz, 1.0, 0], [0, 0, 1.0]], dtype=np.float32)
         M = cv2.getAffineTransform(pts1, np.dot(M, pts1))
-        for i in range(0, X): image[:, :, i] = cv2.warpAffine(image[:, :, i], M, (Y, Z))
+        for i in range(0, X): image[:, :, i, :] = cv2.warpAffine(image[:, :, i, :], M, (Y, Z))
         del pts1
 
         # Repeat and Apply the Coronal transform slice by slice along y
         pts1 = np.float32([[Y / 2, X / 2], [Y / 2, X / 3], [Y / 3, X / 2]])
         M = np.array([[1.0, sy, 0], [sx, 1.0, 0], [0, 0, 1.0]], dtype=np.float32)
         M = cv2.getAffineTransform(pts1, np.dot(M, pts1))
-        for i in range(0, Z): image[i, :, :] = cv2.warpAffine(image[i, :, :], M, (Y, X))
+        for i in range(0, Z): image[i, :, :, :] = cv2.warpAffine(image[i, :, :, :], M, (Y, X))
         del pts1
 
         return np.subtract(image, img_min), [anglex, angley, anglez], [sx, sy, sz]
@@ -1033,6 +1049,10 @@ class SODLoader():
         """
 
         if crop:
+
+            # Reduce large values
+            input[input > 4000] = 4000
+            input[input < -4000] = -4000
 
             ## CLIP top and bottom x values and scale rest of slice accordingly
             b, t = np.percentile(input, (crop_val, 100-crop_val))
@@ -1370,7 +1390,7 @@ class SODLoader():
         for key, feature in data_to_write.items():
 
             # If this is our Data array, use the tostring() method.
-            if key == 'data':
+            if 'data' in key:
                 feature_dict_write[key] = self._bytes_feature(feature.tobytes())  #
 
             else:  # Otherwise convert to a string and encode as bytes to pass on
