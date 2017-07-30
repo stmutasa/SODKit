@@ -14,7 +14,6 @@ import nibabel as nib
 import tensorflow as tf
 import SimpleITK as sitk
 import scipy.ndimage as scipy
-import scipy.misc as misc
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 
@@ -292,22 +291,6 @@ class SODLoader():
             image = mpimg.imread(path)
 
         return image
-    
-
-    def load_tiff(self, filename):
-        """
-        Loads a .tif image into a numpy array
-        :param filename: file name on disc
-        :return: The image
-        """
-
-        # Load the image
-        image = plt.imread(filename)
-
-        # Reverse image dimensions
-        image = np.moveaxis(image, -1, 0)
-
-        return image
 
 
     def load_HA_labels(self, filename):
@@ -390,7 +373,7 @@ class SODLoader():
     def create_breast_mask(self, image):
         """
         Creates a rough mask of breast tissue returned as 1 = breast 0 = nothing
-        :param image:
+        :param image: 
         :return: mask: the mask volume
         """
 
@@ -680,35 +663,20 @@ class SODLoader():
         return image, new_spacing
 
 
-    def zoom_3D(self, volume, new_shape, center=None):
+    def zoom_3D(self, volume, factor):
         """
         Uses scipy to zoom a 3D volume to a new shape
-        :param volume: input volume
-        :param new_shape: array: the new shape to resize to
-        :return:
+        :param volume: 
+        :param factor: 
+        :return: 
         """
 
-        # Calculate the resize factor
-        factor = [new_shape[0]/volume.shape[0], new_shape[1]/volume.shape[1], new_shape[2] / volume.shape[2]]
+        # Define the resize matrix
+        resize_factor = [factor[0] * volume.shape[0], factor[1] * volume.shape[1],
+                         factor[2] * volume.shape[2]]
 
-        # Perform channel by channel resizing
-        resize1 = []
-        resize1.append(scipy.zoom(volume[:, :, :, 0], factor, order=3))
-        resize1.append(scipy.zoom(volume[:, :, :, 1], factor, order=3))
-        resize1.append(scipy.zoom(volume[:, :, :, 2], factor, order=3))
-
-        # Now re concatenate the arrays
-        resize = np.zeros(shape=new_shape, dtype=np.float32)
-        for z in range(3): resize[:, :, :, z] = resize1[z]
-
-        # Calculate a new center:
-        if center:
-            new_center = [int(center[0]*new_shape[0]/volume.shape[0]), int(center[1]*new_shape[1]/volume.shape[1]),
-                          int(center[2] * new_shape[2] / volume.shape[2])]
-
-            return resize, new_center
-
-        return resize
+        # Perform the zoom
+        return scipy.interpolation.zoom(volume, resize_factor, mode='nearest')
 
 
     def fast_3d_affine(self, image, center, angle_range, shear_range=None):
@@ -716,16 +684,13 @@ class SODLoader():
         Performs a 3D affine rotation and/or shear using OpenCV
         :param image: The image volume
         :param center: array: the center of rotation (make this the nodule center) in z,y,x
-        :param angle_range: array: range of angles about z, y, and x
+        :param angle_range: array: range of angles about x, y and z
         :param shear_range: float array: the range of values to shear if you want to shear
         :return:
         """
 
-        # Convert to float
-        image = image.astype(np.float32)
-
         # The image is sent in Z,Y,X format
-        Z, Y, X = image.shape[0], image.shape[1], image.shape[2]
+        Z, Y, X = image.shape
 
         # OpenCV makes interpolated pixels equal 0. Add the minumum value to subtract it later
         img_min = abs(image.min())
@@ -792,12 +757,61 @@ class SODLoader():
         return np.subtract(image, img_min), [anglex, angley, anglez], [sx, sy, sz]
 
 
-    def calc_fast_affine(self, image, angle_range=[], shear_range=None):
+    def fast_2d_affine(self, image, center, angle_range, shear_range=None):
+        """
+        Performs a 3D affine rotation and/or shear using OpenCV
+        :param image: The image
+        :param center: array: the center of rotation (make this the nodule center) in z,y,x
+        :param angle_range: range of angles to rotate
+        :param shear_range: float array: the range of values to shear if you want to shear
+        :return:
+        """
+
+        # The image is sent in Z,Y,X format
+        Y, X = image.shape[0], image.shape[1]
+
+        # OpenCV makes interpolated pixels equal 0. Add the minumum value to subtract it later
+        img_min = abs(image.min())
+        image = np.add(image, img_min)
+
+        # Define the affine angles of rotation
+        angle = random.randrange(-angle_range, angle_range)
+
+        # Matrix to rotate the image
+        M = cv2.getRotationMatrix2D((center[0], center[1]), angle, 1)
+
+        # Apply the affine transform
+        image = cv2.warpAffine(image, M, (Y, X))
+
+        # Done with rotation, return if shear is not defined
+        if shear_range == None: return np.subtract(image, img_min), angle
+
+        # Shear defined, repeat everything for shearing
+
+        # Define the affine shear positions
+        sx = random.uniform(0-shear_range[1], 0+shear_range[1])
+        sy = random.uniform(0-shear_range[0], 0+shear_range[0])
+
+        # First define 3 random points
+        pts1 = np.float32([[Y / 2, X / 2], [Y / 2, X / 3], [Y / 3, X / 2]])
+
+        # Then define a custom 3x3 affine matrix
+        M = np.array([[1.0, sy, 0], [sx, 1.0, 0], [0, 0, 1.0]], dtype=np.float32)
+
+        # Now retreive the affine matrix that OpenCV uses
+        M = cv2.getAffineTransform(pts1, np.dot(M, pts1))
+
+        # Apply the transformation slice by slice
+        image = cv2.warpAffine(image, M, (Y, X))
+
+        return np.subtract(image, img_min), angle, [sy, sx]
+
+
+    def calc_fast_affine(self, image, angle_range=[]):
         """
         This function returns 3 matrices that define affine rotations in 3D
-        :param image:
-        :param angle_range: matrix of range of rotation along z, y, x
-        :param shear_range: matrix of shear along z, y, x
+        :param image: 
+        :param angle_range: matrix of range of rotation along x, y and z
         :return: array with the affine matrices
         """
 
@@ -805,42 +819,23 @@ class SODLoader():
         Z, Y, X = image.shape
 
         # Define the affine angles of rotation
-        anglex = random.randrange(-angle_range[2], angle_range[2])
+        anglex = random.randrange(-angle_range[0], angle_range[0])
         angley = random.randrange(-angle_range[1], angle_range[1])
-        anglez = random.randrange(-angle_range[0], angle_range[0])
+        anglez = random.randrange(-angle_range[2], angle_range[2])
 
         # Matrix to rotate along saggital plane (Y columns, Z rows)
         Mx = cv2.getRotationMatrix2D((Y / 2, Z / 2), anglex, 1)
         My = cv2.getRotationMatrix2D((X / 2, Z / 2), angley, 1)
         Mz = cv2.getRotationMatrix2D((Y / 2, X / 2), anglez, 1)
 
-        # Define the affine shear positions
-        sx = random.uniform(0 - shear_range[2], 0 + shear_range[2])
-        sy = random.uniform(0 - shear_range[1], 0 + shear_range[1])
-        sz = random.uniform(0 - shear_range[0], 0 + shear_range[0])
-
-        # First define 3 random pointsThen define a custom 3x3 affine matrix
-        pts1 = np.float32([[X / 2, Z / 2], [X / 2, Z / 3], [X / 3, Z / 2]])
-        Sy = np.array([[1.0, sx, 0], [sz, 1.0, 0], [0, 0, 1.0]], dtype=np.float32)
-        Sy = cv2.getAffineTransform(pts1, np.dot(Sy, pts1))
-        # Repeat the saggital transform slice by slice along X
-        pts1 = np.float32([[Y / 2, Z / 2], [Y / 2, Z / 3], [Y / 3, Z / 2]])
-        Sx = np.array([[1.0, sy, 0], [sz, 1.0, 0], [0, 0, 1.0]], dtype=np.float32)
-        Sx = cv2.getAffineTransform(pts1, np.dot(Sx, pts1))
-        # Repeat the Coronal transform slice by slice along z
-        pts1 = np.float32([[Y / 2, X / 2], [Y / 2, X / 3], [Y / 3, X / 2]])
-        Sz = np.array([[1.0, sy, 0], [sx, 1.0, 0], [0, 0, 1.0]], dtype=np.float32)
-        Sz = cv2.getAffineTransform(pts1, np.dot(Sz, pts1))
-
-        return [Mz, My, Mx], [Sz, Sy, Sx]
+        return [Mx, My, Mz]
 
 
-    def perform_fast_affine(self, image, M=[], S=[]):
+    def perform_fast_affine(self, image, M=[]):
         """
         This function applies an affnie transform using the given affine matrices
         :param image: input volume
         :param M: Affine matrices along x, y and z
-        :param S: Shear matrix
         :return: image
         """
 
@@ -851,15 +846,10 @@ class SODLoader():
         img_min = abs(image.min())
         image = np.add(image, img_min)
 
-        # Apply the Affine rotations slice by slice
+        # Apply the Affine transforms slice by slice
         for i in range(0, X): image[:, :, i] = cv2.warpAffine(image[:, :, i], M[0], (Y, Z))
         for i in range(0, Y): image[:, i, :] = cv2.warpAffine(image[:, i, :], M[1], (X, Z))
         for i in range(0, Z): image[i, :, :] = cv2.warpAffine(image[i, :, :], M[2], (Y, X))
-
-        # Apply the shear slice by slice
-        for i in range(0, Y): image[:, i, :] = cv2.warpAffine(image[:, i, :], S[1], (X, Z))
-        for i in range(0, X): image[:, :, i] = cv2.warpAffine(image[:, :, i], S[2], (Y, Z))
-        for i in range(0, Z): image[i, :, :] = cv2.warpAffine(image[i, :, :], S[0], (Y, X))
 
         # Return the array with normal houndsfield distribution
         return np.subtract(image, img_min)
@@ -1068,10 +1058,6 @@ class SODLoader():
         """
 
         if crop:
-
-            # Reduce large values
-            input[input > 4000] = 4000
-            input[input < -4000] = -4000
 
             ## CLIP top and bottom x values and scale rest of slice accordingly
             b, t = np.percentile(input, (crop_val, 100-crop_val))
@@ -1409,7 +1395,7 @@ class SODLoader():
         for key, feature in data_to_write.items():
 
             # If this is our Data array, use the tostring() method.
-            if 'data' in key:
+            if key == 'data':
                 feature_dict_write[key] = self._bytes_feature(feature.tobytes())  #
 
             else:  # Otherwise convert to a string and encode as bytes to pass on

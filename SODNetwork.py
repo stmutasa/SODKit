@@ -48,7 +48,7 @@ class SODMatrix():
 
             # Define the Kernel. Can use Xavier init: contrib.layers.xavier_initializer())
             kernel = tf.get_variable('Weights', shape=[F, F, C, K],
-                                     initializer=tf.contrib.layers.xavier_initializer())
+                                     initializer=tf.truncated_normal_initializer)
 
             # Add to the weights collection
             tf.add_to_collection('weights', kernel)
@@ -256,6 +256,7 @@ class SODMatrix():
 
         # Implement an inception layer here ----------------
         with tf.variable_scope(scope) as scope:
+
             # First branch, 1x1x64 convolution
             inception1 = self.convolution('Inception1', X, 1, K, S,
                                           phase_train=phase_train, summary=summary, BN=BN, relu=relu)  # 64x64x64
@@ -281,7 +282,7 @@ class SODMatrix():
                                           phase_train=phase_train, summary=summary, BN=BN, relu=relu)  # 64x64x64
 
             # Concatenate the results for dimension of 64,64,256
-            inception = tf.concat([inception1, inception2, inception3, inception4], -1)
+            inception = tf.concat([inception1, inception2, inception3, inception4], axis=-1)
 
             return inception
 
@@ -562,13 +563,13 @@ class SODMatrix():
 
             # Initialize the weights
             weights = tf.get_variable('weights', shape=[dim, neurons],
-                                      initializer=tf.truncated_normal_initializer(stddev=5e-2))
+                                      initializer=tf.contrib.layers.xavier_initializer())
 
             # Add to the collection of weights
             tf.add_to_collection('weights', weights)
 
             # Initialize the biases
-            biases = tf.Variable(np.ones(neurons), name='Bias', dtype=tf.float32)
+            biases = tf.Variable(np.zeros(neurons), name='Bias', dtype=tf.float32)
 
             # Do the math
             # Do the math
@@ -623,6 +624,44 @@ class SODMatrix():
             h_trans = self.transformer(X, H2, output_size)
 
             return h_trans
+
+
+    def transition_layer(self, scope, X, K, S=1, padding='SAME', phase_train=None, summary=True, BN=True, relu=True):
+        """
+        This function implements a transition layer to insert before the FC layer. Improves regularization
+        :param scope:
+        :param X: Output of the previous layer
+        :param K: Feature maps in the inception layer (will be multiplied by 4 during concatenation)
+        :param S: Stride Whether to downsample the convoluted inceptions
+        :param padding:
+        :param phase_train: For batch norm implementation
+        :param summary: whether to produce a tensorboard summary of this layer
+        :param BN: whether to perform batch normalization
+        :return: the inception layer output after concat
+        """
+
+        # Implement an incepted transition layer here ----------------
+        with tf.variable_scope(scope) as scope:
+
+            # Retreive size of prior network. Prior = [batch, F, F, K]
+            F = X.get_shape().as_list()[1]
+
+            # First branch, 7x7 conv then global avg pool
+            inception1a = self.convolution('Transition1', X, 7, K, S, 'SAME', phase_train, summary, BN, relu)
+            inception1 = tf.nn.avg_pool(inception1a, [1, F, F, 1], [1, 2, 2, 1], 'VALID')
+
+            # Second branch, 5x5 conv then global avg pool
+            inception2a = self.convolution('Transition2', X, 5, K, S, 'SAME', phase_train, summary, BN, relu)
+            inception2 = tf.nn.avg_pool(inception2a, [1, F, F, 1], [1, 2, 2, 1], 'VALID')
+
+            # Third branch, 3x3 conv then global avg pool
+            inception3a = self.convolution('Transition3', X, 3, K, S, 'SAME', phase_train, summary, BN, relu)
+            inception3 = tf.nn.avg_pool(inception3a, [1, F, F, 1], [1, 2, 2, 1], 'VALID')
+
+            # Concatenate the results
+            inception = tf.concat([inception1, inception2, inception3], axis=-1)
+
+            return tf.squeeze(inception)
 
 
     """
