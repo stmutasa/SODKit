@@ -348,6 +348,55 @@ class SODLoader():
         return patient, label, id, phase
 
 
+    def randomize_batches(self, image_dict, batch_size):
+        """
+        This function takes our full data tensors and creates shuffled batches of data.
+        :param image_dict: the dictionary of tensors with the images and labels
+        :param batch_size: batch size to shuffle
+        :return: 
+        """
+
+        min_dq = 16  # Min elements to queue after a dequeue to ensure good mixing
+        capacity = min_dq + 3 * batch_size  # max number of elements in the queue
+        keys, tensors = zip(*image_dict.items())  # Create zip object
+
+        # This function creates batches by randomly shuffling the input tensors. returns a dict of shuffled tensors
+        shuffled = tf.train.shuffle_batch(tensors, batch_size=batch_size,
+                                          capacity=capacity, min_after_dequeue=min_dq)
+
+        # Dictionary to store our shuffled examples
+        batch_dict = {}
+
+        # Recreate the batched data as a dictionary with the new batch size
+        for key, shuffle in zip(keys, shuffled): batch_dict[key] = shuffle
+
+        return batch_dict
+
+
+    def val_batches(self, image_dict, batch_size):
+
+        """
+        Loads a validation set without shuffling it
+        :param image_dict: the dictionary of tensors with the images and labels
+        :param batch_size: batch size to shuffle
+        :return:
+        """
+
+        min_dq = 16  # Min elements to queue after a dequeue to ensure good mixing
+        capacity = min_dq + 3 * batch_size  # max number of elements in the queue
+        keys, tensors = zip(*image_dict.items())  # Create zip object
+
+        # This function creates batches by randomly shuffling the input tensors. returns a dict of shuffled tensors
+        shuffled = tf.train.batch(tensors, batch_size=batch_size, capacity=capacity)
+
+        batch_dict = {}  # Dictionary to store our shuffled examples
+
+        # Recreate the batched data as a dictionary with the new batch size
+        for key, shuffle in zip(keys, shuffled): batch_dict[key] = shuffle
+
+        return batch_dict
+
+
     """
              Pre processing functions.
     """
