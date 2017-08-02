@@ -219,12 +219,11 @@ class SODLoader():
         return return_dict
 
 
-    def load_NIFTY(self, path, reshape=True, shape=[]):
+    def load_NIFTY(self, path, reshape=True):
         """
         This function loads a .nii.gz file into a numpy array with dimensions Z, Y, X, C
         :param filename: path to the file
         :param reshape: whether to reshape the axis from/to ZYX
-        :param shape: If loading failed, uses another method that requires a shape to be defined
         :return:
         """
 
@@ -236,19 +235,6 @@ class SODLoader():
         # Reshape the image data from NiB's XYZ to numpy's ZYXC
         if reshape: data = self.reshape_NHWC(raw_data.get_data(), False)
         else: data = raw_data.get_data()
-
-        # except:
-        #     # Try some other way of loading the data
-        #     array = np.zeros(shape, dtype=np.int16)
-        #
-        #     # Load into this array
-        #     raw_data = nib.Nifti1Image(array, np.eye(4))
-        #
-        #     # Reshape the image data from NiB's XYZ to numpy's ZYXC
-        #     if reshape:
-        #         data = self.reshape_NHWC(raw_data.get_data(), False)
-        #     else:
-        #         data = raw_data.get_data()
 
         # Return the data
         return data
@@ -1297,6 +1283,44 @@ class SODLoader():
             ax[int(i / rows), int(i % rows)].imshow(stack[ind], cmap='gray')
             ax[int(i / rows), int(i % rows)].axis('off')
         if plot: plt.show()
+
+
+    def generate_image_text_overlay(self, text, image, dim_3d=False, color=1.0):
+        """
+        This function displays text over an image
+        :param text: The text to overlay
+        :param image: The input image volume, 2D or 3D numpy array
+        :param dim_3d: whether this is a 3d or 2d image
+        :param color: the color of the text, 0 for black, 1 for white and grayscale in between
+        :return: image: the image or volume with text overlaid
+        """
+
+        # Define color as grayscale between white and black based on max pixel value
+        max_pixel = np.amax(image)
+        text_color = (max_pixel*color, max_pixel*color, max_pixel*color)
+
+        # Define the origin of the text
+        if dim_3d: origin = (0, int(image.shape[2]*.9))
+        else: origin = (0, int(image.shape[1]*.9))
+
+        # Create a copy of the image with text
+        if not dim_3d:
+            texted_image = cv2.putText(img=np.copy(image), text=text, org=origin, fontFace=0, fontScale=0.5,
+                                   color=text_color, thickness=1)
+
+        # For 3D, loop and addend a copied image volume
+        else:
+
+            # Copy image volume
+            texted_image = np.copy(image)
+
+            # addend every slice
+            for z in range(image.shape[0]):
+                texted_image[z] = cv2.putText(img=np.copy(image[z]), text=text, org=origin, fontFace=0, fontScale=0.5,
+                                           color=text_color, thickness=1)
+
+
+        return texted_image
 
 
     def reshape_NHWC(self, vol, NHWC):
