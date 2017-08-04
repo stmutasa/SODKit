@@ -1456,6 +1456,29 @@ class SODLoader():
         return glob.glob(path, recursive=include_subfolders)
 
 
+    def window_image(self, volume, level, width):
+        """
+        Windows the image. For images that come from CT scans
+        :param volume: ndarray, Source image
+        :param level: the center of the window
+        :param width: how wide the window is +-
+        :return: the windowed image
+        """
+
+        # Set the min and max HU
+        minimum = int(level - width)
+        maximum = int(level + width)
+
+        # Fit to max
+        volume[volume > maximum] = maximum
+
+        # fit to min
+        volume[volume < minimum] = minimum
+
+        # Return the windowed image
+        return volume
+
+
     """
          Tool functions: Most of these are hidden
     """
