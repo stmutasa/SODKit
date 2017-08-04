@@ -334,6 +334,24 @@ class SODLoader():
         return patient, label, id, phase
 
 
+    def load_HIRAM_labels(self, filename):
+        """
+        To retreive the labels and patient ID using Dr. Ha's naming convention
+        :param filename: the file name: data/raw/12.1.1/o___-label.nii.gz
+        :return: label, id : self explanatory
+        """
+
+        # os.path.dirname returns : data/raw/12.1.1, split and return the last string
+        dirname = os.path.dirname(filename).split('/')[-1]
+
+        # Retreive the label from the dirname
+        ln = dirname.split('.')[-1]
+        pt = dirname.split('.')[0]
+        study = dirname.split('.')[1]
+
+        return pt, study, ln
+
+
     def randomize_batches(self, image_dict, batch_size):
         """
         This function takes our full data tensors and creates shuffled batches of data.
