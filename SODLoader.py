@@ -732,6 +732,16 @@ class SODLoader():
         return scipy.interpolation.zoom(volume, resize_factor, mode='nearest')
 
 
+    def zoom_2D(self, image, new_shape):
+        """
+        Uses open CV to resize a 2D image
+        :param image: The input image, numpy array
+        :param new_shape: New shape, tuple or array
+        :return: the resized image
+        """
+        return cv2.resize(image,(new_shape[0], new_shape[1]), interpolation = cv2.INTER_CUBIC)
+
+
     def fast_3d_affine(self, image, center, angle_range, shear_range=None):
         """
         Performs a 3D affine rotation and/or shear using OpenCV
