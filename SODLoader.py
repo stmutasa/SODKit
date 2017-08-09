@@ -1034,45 +1034,46 @@ class SODLoader():
         return box, new_center
 
 
-    def generate_DRR(self, volume_data, parameters):
-        # Create projection data from this
-        # data passed in order is z,y,x
-        # need y,x,z for vol_goem shape
-        # for astra data3d need z,y,x
+    def generate_DRR(self, volume_data, parallel = True):
 
-        shape = volume_data.shape
+        """
+        Create a radiographic projection of an input volume.
+        :param volume_data: input 3D np array in Z, Y, X (np default)
+        :param parallel: Whether to use parallel or cone beam
+        :return: proj_data. 2D Projection in frontal view
+        """
 
-        x = shape[2]
-        y = shape[1]
-        z = shape[0]
+        # Retreive shapes
+        Z, Y, X = volume_data.shape
 
-        vol_geom = astra.create_vol_geom(y, x, z)
-        vectors = np.zeros((1, 12))
+        # Create the astra 3D volume geometry
+        vol_geom = astra.create_vol_geom(Y,X,Z)
+        vector = np.zeros((1,12))
 
-        # source
-        vectors[0, 0] = 0
-        vectors[0, 1] = -y / 2
-        vectors[0, 2] = 0
+        # Define the vector of the source
+        plane_width = X
+        vector[0,1] = 1 if parallel else -plane_width/2
+        vector[0,4] = plane_width/2
+        vector[0,6] = plane_width/512
+        vector[0,11] = -plane_width/512
 
-        # center of detector plane
-        vectors[0, 3] = 0
-        vectors[0, 4] = y / 2
-        vectors[0, 5] = 0
+        # Make patient face us by swapping X and Y
+        warped = np.moveaxis(volume_data, 1, 2)
 
-        # vector from detector pixel (0,0) to (0,1)
-        vectors[0, 6] = 1
-        vectors[0, 7] = 0
-        vectors[0, 8] = 0
+        # Create the projection geometries
+        if parallel:
+            proj_geom = astra.create_proj_geom('parallel3d_vec', 512, 512, vector)
+        else:
+            proj_geom = astra.create_proj_geom('cone_vec', 512, 512, vector)
 
-        # vector from detector pixel (0,0) to (1,0)
-        vectors[0, 9] = 0
-        vectors[0, 10] = 0
-        vectors[0, 11] = -1
+        # Create the projections
+        proj_id, proj_data = astra.create_sino3d_gpu(warped, proj_geom, vol_geom)
 
-        proj_geom = astra.create_proj_geom('parallel3d_vec', 512, 512, vectors)
-        proj_id, proj_data = astra.create_sino3d_gpu(volume_data, proj_geom, vol_geom)
+        # Garbage collection
         astra.data3d.delete(proj_id)
-        return proj_data
+
+        # Return the projection
+        return np.squeeze(proj_data)
 
 
     """
