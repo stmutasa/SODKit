@@ -17,6 +17,7 @@ import scipy.ndimage as scipy
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 
+from scipy.io import loadmat
 from skimage import morphology
 
 
@@ -132,6 +133,16 @@ class SODLoader():
         except: pass
 
         return image, numpyOrigin, numpySpacing, dims
+
+
+    def load_MAT(self, path):
+        """
+        Loads a matlab .mat file
+        :param path: 
+        :return: 
+        """
+
+        return loadmat(path)
 
 
     def load_DICOM_2D(self, path, dtype=np.int16):
@@ -1450,6 +1461,9 @@ class SODLoader():
         :param path: specified path. otherwise use data root
         :return:
         """
+
+        # If they want to return the folder list, do that
+        if extension == '*': return glob.glob(path + '*')
 
         # If no path specified use the default data root
         if not path: path = self.data_root
