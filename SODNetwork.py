@@ -542,17 +542,20 @@ class SODMatrix():
             return fc7
 
 
-    def linear_layer(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5, summary=True, BN=False):
+    def linear_layer(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5,
+                     summary=True, BN=False, relu=True):
         """
-        Wrapper for implementing a fully connected layer
-        :param scope: Scopename of the layer
-        :param X: Input of the prior layer
-        :param neurons: Desired number of neurons in the layer
-        :param dropout: Whether to implement dropout here
-        :param phase_train: Are we in testing or training phase
-        :param keep_prob: if doing dropout, the keep probability
-        :param summary: Whether to output a summary
-        :return: fc7: the result of all of the above
+        Wrapper for implementing a linear layer without or without relu/bn/dropout
+        :param scope: internal name
+        :param X: input of prior layer
+        :param neurons: desired connection number
+        :param dropout: whether to use dropout
+        :param phase_train: are we in train or test phase
+        :param keep_prob: if using dropout, the keep prob
+        :param summary: whether to output a summary
+        :param BN: whether to use batch norm
+        :param relu: whether to use a nonlinearity
+        :return:
         """
 
         # Retreive the size of the last layer
@@ -572,10 +575,16 @@ class SODMatrix():
             biases = tf.Variable(np.zeros(neurons), name='Bias', dtype=tf.float32)
 
             # Do the math
-            # Do the math
             linear = tf.matmul(X, weights)
+
+            # Batch norm without biases
             if BN: linear = self.batch_normalization(linear, phase_train, 'LinearNorm')
-            linear = tf.nn.relu(linear + biases, name=scope.name)
+
+            # add biases
+            linear = tf.add(linear, biases)
+
+            # relu for nonlinear linear layers. no relu for linear regressions
+            if relu: linear = tf.nn.relu(linear, name=scope.name)
 
             # Dropout here if wanted and in train phase
             if phase_train and dropout: linear = tf.nn.dropout(linear, keep_prob)
