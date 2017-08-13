@@ -362,13 +362,13 @@ class SODMatrix():
         """
 
         # Set channel size based on input depth
-        C = X.get_shape().as_list()[3]
+        C = X.get_shape().as_list()[-1]
 
         # Set the scope. Implement a residual layer below: Conv-relu-conv-residual-relu
         with tf.variable_scope(scope) as scope:
 
             # The first layer is an inception layer
-            conv1 = self.inception_layer(scope, X, K/8, 1, phase_train=phase_train)
+            conv1 = self.inception_layer(scope, X, K, 1, phase_train=phase_train)
 
             # Set channel size based on input depth
             #C = conv1.get_shape().as_list()[3]
@@ -566,7 +566,7 @@ class SODMatrix():
 
             # Initialize the weights
             weights = tf.get_variable('weights', shape=[dim, neurons],
-                                      initializer=tf.contrib.layers.xavier_initializer())
+                                      initializer=tf.truncated_normal_initializer(stddev=5e-2))
 
             # Add to the collection of weights
             tf.add_to_collection('weights', weights)
