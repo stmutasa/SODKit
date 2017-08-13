@@ -572,7 +572,7 @@ class SODMatrix():
             tf.add_to_collection('weights', weights)
 
             # Initialize the biases
-            biases = tf.Variable(np.zeros(neurons), name='Bias', dtype=tf.float32)
+            biases = tf.Variable(np.ones(neurons), name='Bias', dtype=tf.float32)
 
             # Do the math
             linear = tf.matmul(X, weights)
