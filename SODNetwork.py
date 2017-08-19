@@ -24,7 +24,8 @@ class SODMatrix():
      Convolution wrappers
     """
 
-    def convolution(self, scope, X, F, K, S=2, padding='SAME', phase_train=None, summary=True, BN=True, relu=True):
+    def convolution(self, scope, X, F, K, S=2, padding='SAME', phase_train=None,
+                    summary=True, BN=True, relu=True, downsample=False):
         """
         This is a wrapper for convolutions
         :param scope:
@@ -37,6 +38,7 @@ class SODMatrix():
         :param summary: whether to produce a tensorboard summary of this layer
         :param BN: whether to perform batch normalization
         :param relu: bool, whether to do the activation function at the end
+        :param downsample: whether to perform a max/avg downsampling at the end
         :return:
         """
 
@@ -54,7 +56,7 @@ class SODMatrix():
             tf.add_to_collection('weights', kernel)
 
             # Perform the actual convolution
-            conv = tf.nn.conv2d(X, kernel, [1, S, S, 1], padding=padding)  # Create a 2D tensor with BATCH_SIZE rows
+            conv = tf.nn.conv2d(X, kernel, [1, S, S, 1], padding=padding)
 
             # Apply the batch normalization. Updates weights during training phase only
             if BN:
@@ -68,6 +70,9 @@ class SODMatrix():
 
             # Relu activation
             if relu: conv = tf.nn.relu(conv, name=scope.name)
+
+            # If requested, use the avg + max pool downsample operation
+            if downsample: conv = self.incepted_downsample(conv)
 
             # Create a histogram/scalar summary of the conv1 layer
             if summary: self._activation_summary(conv)
@@ -287,63 +292,30 @@ class SODMatrix():
             return inception
 
 
-    def incepted_downsample(self, scope, X, K, S=2, padding='SAME', phase_train=None, summary=True, BN=True, relu=True):
+    def incepted_downsample(self, X, S=2, padding='SAME', summary=True):
         """
-        This function implements a downsampling layer that gives the network 3 options
-         for reducing parameter size, maxPool, avgPool or strided convolutions
+        This function implements a downsampling layer that utilizes both an average and max pooling operation
         :param scope:
         :param X: Output of the previous layer
-        :param K: Feature maps in the inception layer (will be multiplied by 4 during concatenation)
         :param S: The degree of downsampling or stride
-        :param padding:
-        :param phase_train: For batch norm implementation
+        :param padding: SAME or VALID
         :param summary: whether to produce a tensorboard summary of this layer
-        :param BN: whether to perform batch normalization
-        :return: the inception layer output after concat
+        :return: the layer output after concat
         """
 
-        # Implement an inception layer here ----------------
-        with tf.variable_scope(scope) as scope:
+        # 1st branch, AVG pool
+        avg = tf.nn.avg_pool(X, [1, 2, 2, 1], [1, S, S, 1], padding)
 
-            # x: (-, 8, 8, k), strided: (-, 4, 4, k), avg: (-, 4, 4, k), max: (-, 4, 4, k), inc: (11, 4, 4, k*4)
+        # 2nd branch, max pool
+        max = tf.nn.max_pool(X, [1, 2, 2, 1], [1, S, S, 1], padding)
 
-            # First branch strided convolution
-            strided = self.convolution('IDS1', X, 2, K, S,
-                                          phase_train=phase_train, summary=False, BN=False, relu=False)
+        # Concatenate the results
+        inception = tf.concat([avg, max], axis=-1)
 
-            # 1x1 convolution to match filters
-            X = self.convolution('1by1', X, 1, K, 1, 'SAME', phase_train, summary, False, False)
+        # Create a histogram/scalar summary of the conv1 layer
+        if summary: self._activation_summary(inception)
 
-            # Second branch, AVG pool
-            avg = tf.nn.avg_pool(X, [1, 2, 2, 1], [1, S, S, 1], padding)
-
-            # Third branch, max pool
-            max = tf.nn.max_pool(X, [1, 2, 2, 1], [1, S, S, 1], padding)
-
-            # Concatenate the results
-            inception = tf.concat([tf.concat([strided, avg], axis=-1),max], axis=-1)
-
-            # Apply the batch normalization. Updates weights during training phase only
-            if BN:
-                inception = tf.cond(phase_train,
-                                   lambda: tf.contrib.layers.batch_norm(inception, activation_fn=None, center=True,
-                                                                        scale=True,
-                                                                        updates_collections=None, is_training=True,
-                                                                        reuse=None,
-                                                                        scope=scope, decay=0.9, epsilon=1e-5),
-                                   lambda: tf.contrib.layers.batch_norm(inception, activation_fn=None, center=True,
-                                                                        scale=True,
-                                                                        updates_collections=None, is_training=False,
-                                                                        reuse=True,
-                                                                        scope=scope, decay=0.9, epsilon=1e-5))
-
-            # Relu activation
-            if relu: inception = tf.nn.relu(inception, name=scope.name)
-
-            # Create a histogram/scalar summary of the conv1 layer
-            if summary: self._activation_summary(inception)
-
-            return inception
+        return inception
 
 
     def res_inc_layer(self, scope, X, F, K, padding='SAME', phase_train=None, summary=True, BN=True, relu=True):
@@ -442,19 +414,16 @@ class SODMatrix():
             # Second dropout
             if K_prob: conv2 = tf.nn.dropout(conv2, K_prob)
 
-            # Final STRIDED conv without BN or RELU
-            if DSC: conv = self.incepted_downsample('ConvFinal', conv2, K, S, 'SAME', phase_train, summary, False, False)
-            else: conv = self.convolution('ConvFinal', conv2, F, K, S, 'SAME', phase_train, summary, False, False)
+            # Final downsampled conv without BN or RELU
+            if DSC: conv = self.convolution('ConvFinal', conv2, F, K, 1, 'SAME', phase_train, summary, False, False, True)
+            else: conv = self.convolution('ConvFinal', conv2, F, K*S, S, 'SAME', phase_train, summary, False, False)
 
-            # 1x1 convolution to match filters
-            if DSC: X = self.convolution('1by1', X, 1, K*3, 1, 'SAME', phase_train, summary, False, False)
-            else: X = self.convolution('1by1', X, 1, K, 1, 'SAME', phase_train, summary, False, False)
-
-            # Max pool of the input convolution
-            pool = tf.nn.max_pool(X, [1, F, F, 1], [1, S, S, 1], padding)
+            # Downsample the residual input if we did the conv layer. pool or strided
+            if DSC: X = self.incepted_downsample(X)
+            elif S>1: X = self.convolution('ResDown', X, 2, K*S, S, phase_train=phase_train, BN=False, relu=False)
 
             # The Residual block
-            residual = tf.add(conv, pool)
+            residual = tf.add(conv, X)
 
             # Apply the batch normalization. Updates weights during training phase only
             if BN:
