@@ -462,7 +462,69 @@ class SODMatrix():
         return
 
 
-    def fc7_layer(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5, summary=True, BN=False):
+    def fc7_layer(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5,
+                  summary=True, BN=False, relu=True, override=None):
+
+        """
+        Wrapper for implementing an FC layer based on a conv layer
+        :param scope: Scopename of the layer
+        :param X: Input of the prior layer
+        :param neurons: Desired number of neurons in the layer
+        :param dropout: Whether to implement dropout here
+        :param phase_train: Are we in testing or training phase = only relevant for dropout
+        :param keep_prob: if doing dropout, the keep probability
+        :param summary: Whether to output a summaryb: 
+        :param BN: Batch norm or not
+        :param relu: relu or not
+        :param override: to override conv dimensions, if you want to average activations 
+        :return: result of all of the above. Averaged if overriden
+        """
+
+        # The Fc7 layer scope
+        with tf.variable_scope(scope) as scope:
+
+            # Retreive the size of the last layer
+            batch_size, height, width, channel = X.get_shape().as_list()
+            if override: height, width = override, override
+
+            # Initialize the weights
+            weights = tf.get_variable('weights', shape=[height * width * channel, neurons])
+
+            # Add to the collection of weights
+            tf.add_to_collection('weights', weights)
+
+            # Initialize the biases
+            biases = tf.get_variable('biases', shape=[neurons])
+
+            # Reshape weights
+            reshape = tf.reshape(weights, shape=[height, width, channel, neurons])
+
+            # Convolution
+            conv = tf.nn.conv2d(input=X, filter=reshape, strides=[1, 1, 1, 1], padding="VALID", name='Conv')
+
+            # Optional batch norm
+            if BN: conv = self.batch_normalization(conv, phase_train, 'Fc7Norm')
+
+            # Add biases
+            conv = tf.nn.bias_add(conv, biases, name='Bias')
+
+            # Optional relu
+            if relu: conv = tf.nn.relu(conv, name=scope.name)
+
+            # Dropout here if wanted and in train phase
+            if phase_train and dropout: conv = tf.nn.dropout(conv, keep_prob)
+
+            # Average outputs if we used an override
+            if override:
+                F = conv.get_shape().as_list()[1]
+                conv = tf.nn.avg_pool(conv, [1, F, F, 1], [1, 2, 2, 1], 'VALID')
+
+            # Activation summary
+            if summary: self._activation_summary(conv)
+
+            return tf.squeeze(conv)
+
+    def fc7_layer_old(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5, summary=True, BN=False):
         """
         Wrapper for implementing a fully connected layer
         :param scope: Scopename of the layer
