@@ -7,6 +7,7 @@ mean absolute error, mean squared error, DICE score, sensitivity, specificity, A
 
 import tensorflow as tf
 import numpy as np
+import sklearn.metrics as skmetrics
 
 
 class SODTester():
@@ -169,3 +170,22 @@ class SODTester():
             print('-' * 70)
             print('--- EPOCH: %s SN: %.3f, SP: %.3f, F1: %.3f ---'
                   % (Epoch, self.sensitiviy, self.specificity, self.F1_score))
+
+
+    def skmetrics_results(self):
+        pass
+
+        # print
+        # "validation accuracy:", val_accuracy
+        # y_true = np.argmax(test_label, 1)
+        # print
+        # "Precision", sk.metrics.precision_score(y_true, y_pred)
+        # print
+        # "Recall", sk.metrics.recall_score(y_true, y_pred)
+        # print
+        # "f1_score", sk.metrics.f1_score(y_true, y_pred)
+        # print
+        # "confusion_matrix"
+        # print
+        # sk.metrics.confusion_matrix(y_true, y_pred)
+        # fpr, tpr, tresholds = sk.metrics.roc_curve(y_true, y_pred)

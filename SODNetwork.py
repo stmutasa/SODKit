@@ -524,6 +524,7 @@ class SODMatrix():
 
             return tf.squeeze(conv)
 
+
     def fc7_layer_old(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5, summary=True, BN=False):
         """
         Wrapper for implementing a fully connected layer
@@ -751,19 +752,38 @@ class SODMatrix():
         return loss
 
 
-    def MSE_loss(self, logits, labels, summary=True):
+    def MSE_loss(self, logits, labels, mask_factor=0.0, mask_avg=0.0, mask_norm=0.0, summary=True):
         """
-        Calculates the mean squared error, made for boneAge linear regressor output. 
+        Calculates the mean squared error, made for boneAge linear regressor output.
         :param logits: not really logits but outputs of the network
         :param labels: actual values
-        :return: loss: The loss value as a tf.float32
+        :param mask_factor:
+        :param mask_avg:
+        :param mask_norm:
+        :param summary:
+        :return: The loss value
         """
 
-        # Calculate MSE loss: square root of the mean of the square of an elementwise subtraction of logits and labels
-        MSE_loss = tf.reduce_mean(tf.square(labels - logits))
+        # Must squeeze because otherwise we may subtract a row vector from a column vector 9giving a matrix)
+        labels = tf.squeeze(labels)
+        logits = tf.squeeze(logits)
+
+        # For distance sensitive mask based on distance from given mask avg
+        mask = tf.cast(labels, tf.float32)
+
+        # Now normalize so that something one norm away gets 2
+        mask = tf.add(tf.multiply(tf.divide(tf.abs(tf.subtract(mask_avg, mask)), mask_norm), mask_factor), 1.0)
+
+        # Convert to row vector
+        mask = tf.squeeze(mask)
+
+        # Calculate MSE with the factor multiplied in
+        MSE_loss = tf.reduce_mean(tf.multiply(tf.square(labels - logits), mask))
 
         # Output the summary of the MSE and MAE
-        if summary: tf.summary.scalar('Mean Square Error', MSE_loss)
+        if summary:
+            tf.summary.scalar('Square Error', MSE_loss)
+            tf.summary.scalar('Absolute Error', tf.reduce_mean(tf.abs(labels - logits)))
 
         # Add these losses to the collection
         tf.add_to_collection('losses', MSE_loss)
