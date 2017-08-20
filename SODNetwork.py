@@ -307,10 +307,10 @@ class SODMatrix():
         avg = tf.nn.avg_pool(X, [1, 2, 2, 1], [1, S, S, 1], padding)
 
         # 2nd branch, max pool
-        max = tf.nn.max_pool(X, [1, 2, 2, 1], [1, S, S, 1], padding)
+        maxi = tf.nn.max_pool(X, [1, 2, 2, 1], [1, S, S, 1], padding)
 
         # Concatenate the results
-        inception = tf.concat([avg, max], axis=-1)
+        inception = tf.add(avg, maxi)
 
         # Create a histogram/scalar summary of the conv1 layer
         if summary: self._activation_summary(inception)
