@@ -419,7 +419,7 @@ class SODMatrix():
             else: conv = self.convolution('ConvFinal', conv2, F, K*S, S, 'SAME', phase_train, summary, False, False)
 
             # Downsample the residual input if we did the conv layer. pool or strided
-            if DSC: X = self.incepted_downsample(X)
+            if DSC: X = self.convolution('ResDown', X, 2, K, 1, 'SAME', phase_train, summary, False, False, True)
             elif S>1: X = self.convolution('ResDown', X, 2, K*S, S, phase_train=phase_train, BN=False, relu=False)
 
             # The Residual block
