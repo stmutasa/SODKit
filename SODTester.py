@@ -7,7 +7,7 @@ mean absolute error, mean squared error, DICE score, sensitivity, specificity, A
 
 import tensorflow as tf
 import numpy as np
-import sklearn.metrics as skmetrics
+import sklearn.metrics as skm
 
 
 class SODTester():
@@ -31,11 +31,13 @@ class SODTester():
     PPV = 0             # Also known as precision
     NPV = 0
     F1_score = 0
+    AUC = 0
 
     # Other variables
     right = 0
     total = 0
     best_step = 0
+    calls = 0
 
     def __init__(self):
         pass
@@ -112,6 +114,10 @@ class SODTester():
         label = np.squeeze(labels.astype(np.int8))
         logit = np.squeeze(np.argmax(logits.astype(np.float), axis=1))
 
+        # First calculate AUC
+        self.AUC += skm.roc_auc_score(label, logit)
+        self.calls += 1
+
         # Retreive metrics
         for z in range(len(label)):
 
@@ -143,8 +149,8 @@ class SODTester():
 
             # Now print
             print('-' * 70)
-            print('Patient %s Class: %s' % (step, label[to_print]))
-            print('Patient %s Preds: %s' % (step, logit[to_print]))
+            print('Patient %s Class: %s' % (step, label[:to_print]))
+            print('Patient %s Preds: %s' % (step, logit[:to_print]))
 
 
     def retreive_metrics_classification(self, Epoch, display=True):
@@ -156,20 +162,52 @@ class SODTester():
         :return: 
         """
 
-        # Calculate the metrics
-        self.sensitiviy = self.TP / (self.TP + self.FN)
-        self.specificity = self.TN / (self.TN + self.FP)
-        self.PPV = self.TP / (self.TP + self.FP)
-        self.NPV = self.TN / (self.TN + self.FN)
+        # Calculate the metrics. To prevent division by zero, use error handling
+        try: self.sensitiviy = self.TP / (self.TP + self.FN)
+        except: self.sensitiviy = 0
+
+        try: self.specificity = self.TN / (self.TN + self.FP)
+        except: self.specificity = 0
+
+        try: self.PPV = self.TP / (self.TP + self.FP)
+        except: self.PPV = 0
+
+        try: self.NPV = self.TN / (self.TN + self.FN)
+        except: self.PPV = 0
 
         # F1 score
-        self.F1_score = 2/((1/self.sensitiviy)+(1/self.PPV))
+        try: self.F1_score = 2/((1/self.sensitiviy)+(1/self.PPV))
+        except: self.F1_score = 0
+
+        # AUC
+        self.AUC /= self.calls
+
+        # Accuracy
+        self.accuracy = 100 * self.right/self.total
 
         # Print the final accuracies and MAE if requested
         if display:
             print('-' * 70)
-            print('--- EPOCH: %s SN: %.3f, SP: %.3f, F1: %.3f ---'
-                  % (Epoch, self.sensitiviy, self.specificity, self.F1_score))
+            print('--- EPOCH: %s, ACC: %.2f, SN: %.3f, SP: %.3f, AUC: %.3f, F1: %.3f ---'
+                  % (Epoch, self.accuracy, self.sensitiviy, self.specificity, self.AUC, self.F1_score))
+            print('--- True Pos: %s, False Pos: %s, True Neg: %s, False Neg: %s ---'
+                  % (self.TP, self.FP, self.TN, self.FN))
+
+
+    def calc_softmax(self, X):
+        """
+        Computes the softmax of a given vector
+        :param X: numpy array
+        :return:
+        """
+
+        # Copy array
+        softmax = np.copy(X)
+
+        for z in range (len(X)):
+            softmax[z] = np.exp(X[z]) / np.sum(np.exp(X[z]), axis=0)
+
+        return softmax
 
 
     def skmetrics_results(self):

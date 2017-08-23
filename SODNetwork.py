@@ -15,6 +15,9 @@ class SODMatrix():
     SOD Loader class is a class for loading all types of data into protocol buffers
     """
 
+    # Define training or testing phase
+    training_phase = None
+
     def __init__(self):
 
         pass
@@ -47,6 +50,9 @@ class SODMatrix():
 
         # Set the scope
         with tf.variable_scope(scope) as scope:
+
+            # Set training phase variable
+            self.training_phase = phase_train
 
             # Define the Kernel. Can use Xavier init: contrib.layers.xavier_initializer())
             kernel = tf.get_variable('Weights', shape=[F, F, C, K],
@@ -310,7 +316,7 @@ class SODMatrix():
         maxi = tf.nn.max_pool(X, [1, 2, 2, 1], [1, S, S, 1], padding)
 
         # Concatenate the results
-        inception = tf.add(avg, maxi)
+        inception = tf.concat([avg, maxi], -1)
 
         # Create a histogram/scalar summary of the conv1 layer
         if summary: self._activation_summary(inception)
@@ -419,7 +425,8 @@ class SODMatrix():
             else: conv = self.convolution('ConvFinal', conv2, F, K*S, S, 'SAME', phase_train, summary, False, False)
 
             # Downsample the residual input if we did the conv layer. pool or strided
-            if DSC: X = self.convolution('ResDown', X, 2, K, 1, 'SAME', phase_train, summary, False, False, True)
+            #if DSC: X = self.convolution('ResDown', X, 2, K, 1, 'SAME', phase_train, summary, False, False, True)
+            if DSC: X = self.incepted_downsample(X)
             elif S>1: X = self.convolution('ResDown', X, 2, K*S, S, phase_train=phase_train, BN=False, relu=False)
 
             # The Residual block
