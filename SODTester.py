@@ -308,7 +308,7 @@ class SODTester():
         :return:
         """
 
-        return np.eye(int(n_classes))[label.astype(np.int16)]
+        return np.eye(int(n_classes))[labels.astype(np.int16)]
 
 
     def display_ROC_graph(self, plot=False):
@@ -318,16 +318,30 @@ class SODTester():
         :return:
         """
 
+        # Plot all ROC curves
         plt.figure()
-        lw = 2
-        plt.plot(fpr[2], tpr[2], color='darkorange',
-                 lw=lw, label='ROC curve (area = %0.2f)' % roc_auc[2])
-        plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
+        plt.plot(fpr["micro"], tpr["micro"],
+                 label='micro-average ROC curve (area = {0:0.2f})'
+                       ''.format(roc_auc["micro"]),
+                 color='deeppink', linestyle=':', linewidth=4)
+
+        plt.plot(fpr["macro"], tpr["macro"],
+                 label='macro-average ROC curve (area = {0:0.2f})'
+                       ''.format(roc_auc["macro"]),
+                 color='navy', linestyle=':', linewidth=4)
+
+        colors = cycle(['aqua', 'darkorange', 'cornflowerblue'])
+        for i, color in zip(range(n_classes), colors):
+            plt.plot(fpr[i], tpr[i], color=color, lw=lw,
+                     label='ROC curve of class {0} (area = {1:0.2f})'
+                           ''.format(i, roc_auc[i]))
+
+        plt.plot([0, 1], [0, 1], 'k--', lw=lw)
         plt.xlim([0.0, 1.0])
         plt.ylim([0.0, 1.05])
         plt.xlabel('False Positive Rate')
         plt.ylabel('True Positive Rate')
-        plt.title('Receiver operating characteristic example')
+        plt.title('Some extension of Receiver operating characteristic to multi-class')
         plt.legend(loc="lower right")
         plt.show()
 
