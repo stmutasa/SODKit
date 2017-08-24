@@ -5,9 +5,10 @@ mean absolute error, mean squared error, DICE score, sensitivity, specificity, A
 
 """
 
-import tensorflow as tf
+import matplotlib.pyplot as plt
 import numpy as np
 import sklearn.metrics as skm
+from scipy import interp
 
 
 class SODTester():
@@ -22,25 +23,21 @@ class SODTester():
     accuracy = 0
 
     # Classification variables
-    TP = 0
-    FP = 0
-    TN = 0
-    FN = 0
-    sensitiviy = 0      # Also known as recall
-    specificity = 0
-    PPV = 0             # Also known as precision
-    NPV = 0
-    F1_score = 0
-    AUC = 0
+    TP, FP, TN, FN = 0, 0, 0, 0
+    sensitiviy, specificity = 0, 0
+    PPV, NPV = 0, 0
+    F1_score, AUC = 0, 0
+    roc_auc, fpr, tpr = {}, {}, {}
 
     # Other variables
-    right = 0
-    total = 0
-    best_step = 0
-    calls = 0
+    right, total, calls = 0, 0, 0
+    best_step, num_classes = 0, 0
 
-    def __init__(self):
-        pass
+    def __init__(self, binary, regression):
+
+        # Define whether this is a binary, multiclass or linear regression model
+        self.binary = binary
+        self.regression = regression
 
     """
      Performance Metrics
@@ -153,6 +150,84 @@ class SODTester():
             print('Patient %s Preds: %s' % (step, logit[:to_print]))
 
 
+    def calculate_multiclass_metrics(self, logitz, labelz, step, n_classes, display=True):
+        """
+        Calculates the metrics for a multiclass problem
+        :param logits: raw logits = will be softmaxed
+        :param labels: raw labels = will be made one hot
+        :param step: the current step
+        :param n_classes: number of total classes
+        :param display: whether to print a summary
+        :return:
+        """
+
+        # Retreive the one hot labels and softmax logits
+        logits = self.calc_softmax(logitz)
+        labels = np.eye(int(n_classes))[labelz.astype(np.int16)]
+
+        # Set classes count since this must be non binary
+        self.num_classes = n_classes
+
+        # Get the metrics for each class
+        for i in range (n_classes):
+
+            # First retreive the fpr and tpr
+            self.fpr[i], self.tpr[i], _ = skm.roc_curve(labels[:, i], logits[:, i])
+
+            # Now get the AUC
+            self.roc_auc[i] = skm.auc(self.fpr[i], self.tpr[i])
+
+        # Now get the metrics for the micro ROC
+        self.fpr['micro'], self.tpr['micro'], _ = skm.roc_curve(labels.ravel(), logits.ravel())
+        self.roc_auc['micro'] = skm.auc(self.fpr['micro'], self.tpr['micro'])
+
+        # Now Macro ROC: First aggregate all false positive rates
+        all_fpr = np.unique(np.concatenate([self.fpr[i] for i in range(n_classes)]))
+
+        # Then interpolate all ROC curves at these points
+        mean_tpr = np.zeros_like(all_fpr)
+        for i in range(n_classes): mean_tpr += interp(all_fpr, self.fpr[i], self.tpr[i])
+
+        # Finally average it and compute AUC
+        mean_tpr /= n_classes
+
+        self.fpr["macro"] = all_fpr
+        self.tpr["macro"] = mean_tpr
+        self.roc_auc["macro"] = skm.auc(self.fpr["macro"], self.tpr["macro"])
+
+        # Increment global SOD
+        self.AUC += self.roc_auc["macro"]
+        self.calls += 1
+
+        # Now for the other metrics
+        label = np.squeeze(labelz.astype(np.int8))
+        logit = np.squeeze(np.argmax(logitz.astype(np.float), axis=1))
+
+        # Retreive metrics
+        for z in range(len(label)):
+
+            # If we got this right, make it right
+            if label[z] == logit[z]: self.right += 1
+
+        # Increment total
+        self.total += len(label)
+
+        # Print Summary if wanted
+        if display:
+
+            # How many to print
+            to_print = min(len(label), 15)
+
+            # Now print
+            print('-' * 70)
+            print('Patient %s Class: %s' % (step, label[:to_print]))
+            print('Patient %s Preds: %s' % (step, logit[:to_print]))
+
+            # Display one per class
+            for z in range (n_classes): print ('Class %s: %.3f --- '%(z, self.roc_auc[z]), end='')
+            print ('Micro AUC: %.3f, Macro AUC: %.3f' %(self.roc_auc['micro'], self.roc_auc["macro"]))
+
+
     def retreive_metrics_classification(self, Epoch, display=True):
 
         """
@@ -163,21 +238,24 @@ class SODTester():
         """
 
         # Calculate the metrics. To prevent division by zero, use error handling
-        try: self.sensitiviy = self.TP / (self.TP + self.FN)
-        except: self.sensitiviy = 0
 
-        try: self.specificity = self.TN / (self.TN + self.FP)
-        except: self.specificity = 0
+        # Some metrics only make sense for binary
+        if self.binary:
+            try: self.sensitiviy = self.TP / (self.TP + self.FN)
+            except: self.sensitiviy = 0
 
-        try: self.PPV = self.TP / (self.TP + self.FP)
-        except: self.PPV = 0
+            try: self.specificity = self.TN / (self.TN + self.FP)
+            except: self.specificity = 0
 
-        try: self.NPV = self.TN / (self.TN + self.FN)
-        except: self.PPV = 0
+            try: self.PPV = self.TP / (self.TP + self.FP)
+            except: self.PPV = 0
 
-        # F1 score
-        try: self.F1_score = 2/((1/self.sensitiviy)+(1/self.PPV))
-        except: self.F1_score = 0
+            try: self.NPV = self.TN / (self.TN + self.FN)
+            except: self.PPV = 0
+
+            # F1 score
+            try: self.F1_score = 2/((1/self.sensitiviy)+(1/self.PPV))
+            except: self.F1_score = 0
 
         # AUC
         self.AUC /= self.calls
@@ -187,11 +265,23 @@ class SODTester():
 
         # Print the final accuracies and MAE if requested
         if display:
+
             print('-' * 70)
-            print('--- EPOCH: %s, ACC: %.2f, SN: %.3f, SP: %.3f, AUC: %.3f, F1: %.3f ---'
-                  % (Epoch, self.accuracy, self.sensitiviy, self.specificity, self.AUC, self.F1_score))
-            print('--- True Pos: %s, False Pos: %s, True Neg: %s, False Neg: %s ---'
-                  % (self.TP, self.FP, self.TN, self.FN))
+
+            # Print depends on binary or not
+            if self.binary:
+
+                print('--- EPOCH: %s, ACC: %.2f, SN: %.3f, SP: %.3f, AUC: %.3f, F1: %.3f ---'
+                      % (Epoch, self.accuracy, self.sensitiviy, self.specificity, self.AUC, self.F1_score))
+                print('--- True Pos: %s, False Pos: %s, True Neg: %s, False Neg: %s ---'
+                      % (self.TP, self.FP, self.TN, self.FN))
+
+            else:
+
+                # Display one per class
+                print('--- EPOCH: %s, ACC: %.2f %%, AUC: %.3f, ---' % (Epoch, self.accuracy, self.AUC))
+                for z in range(self.num_classes): print('Class %s: %.3f --- ' % (z, self.roc_auc[z]), end='')
+                print('Micro AUC: %.3f, Macro AUC: %.3f' % (self.roc_auc['micro'], self.roc_auc["macro"]))
 
 
     def calc_softmax(self, X):
@@ -208,6 +298,38 @@ class SODTester():
             softmax[z] = np.exp(X[z]) / np.sum(np.exp(X[z]), axis=0)
 
         return softmax
+
+
+    def make_one_hot(self, n_classes, labels):
+        """
+        Makes the input array one HOT encoded
+        :param n_classes:
+        :param labels:
+        :return:
+        """
+
+        return np.eye(int(n_classes))[label.astype(np.int16)]
+
+
+    def display_ROC_graph(self, plot=False):
+        """
+        Displays a receiver operator graph
+        :param plot:
+        :return:
+        """
+
+        plt.figure()
+        lw = 2
+        plt.plot(fpr[2], tpr[2], color='darkorange',
+                 lw=lw, label='ROC curve (area = %0.2f)' % roc_auc[2])
+        plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('Receiver operating characteristic example')
+        plt.legend(loc="lower right")
+        plt.show()
 
 
     def skmetrics_results(self):
