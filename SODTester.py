@@ -346,6 +346,141 @@ class SODTester():
         plt.show()
 
 
+    def calculate_boneage_errors(self, predictions, label):
+        """
+        This function retreives the labels and predictions and then outputs the accuracy based on the actual
+        standard deviations from the atlas of bone ages. The prediction is considered "right" if it's within
+        two standard deviations
+        :param predictions:
+        :param labels:
+        :param girls: Whether we're using the female or male standard deviations
+        :return: Accurace : calculated as % of right/total
+        """
+
+        # First define our variables:
+        right = 0.0  # Number of correct predictions
+        total = predictions.size  # Number of total predictions
+        std_dev = np.zeros_like(predictions, dtype='float32')  # The array that will hold our STD Deviations
+        tot_err = 0.0
+
+        # No apply the standard deviations
+        for i in range(0, total):
+
+            # Bunch of if statements assigning the STD for the patient's true age
+            if FLAGS.model < 3:  # Girls
+                if label[i] <= (3 / 12):
+                    std_dev[i] = 0.72 / 12
+                elif label[i] <= (6 / 12):
+                    std_dev[i] = 1.16 / 12
+                elif label[i] <= (9 / 12):
+                    std_dev[i] = 1.36 / 12
+                elif label[i] <= (12 / 12):
+                    std_dev[i] = 1.77 / 12
+                elif label[i] <= (18 / 12):
+                    std_dev[i] = 3.49 / 12
+                elif label[i] <= (24 / 12):
+                    std_dev[i] = 4.64 / 12
+                elif label[i] <= (30 / 12):
+                    std_dev[i] = 5.37 / 12
+                elif label[i] <= 3:
+                    std_dev[i] = 5.97 / 12
+                elif label[i] <= 3.5:
+                    std_dev[i] = 7.48 / 12
+                elif label[i] <= 4:
+                    std_dev[i] = 8.98 / 12
+                elif label[i] <= 4.5:
+                    std_dev[i] = 10.73 / 12
+                elif label[i] <= 5:
+                    std_dev[i] = 11.65 / 12
+                elif label[i] <= 6:
+                    std_dev[i] = 10.23 / 12
+                elif label[i] <= 7:
+                    std_dev[i] = 9.64 / 12
+                elif label[i] <= 8:
+                    std_dev[i] = 10.23 / 12
+                elif label[i] <= 9:
+                    std_dev[i] = 10.74 / 12
+                elif label[i] <= 10:
+                    std_dev[i] = 11.73 / 12
+                elif label[i] <= 11:
+                    std_dev[i] = 11.94 / 12
+                elif label[i] <= 12:
+                    std_dev[i] = 10.24 / 12
+                elif label[i] <= 13:
+                    std_dev[i] = 10.67 / 12
+                elif label[i] <= 14:
+                    std_dev[i] = 11.3 / 12
+                elif label[i] <= 15:
+                    std_dev[i] = 9.23 / 12
+                else:
+                    std_dev[i] = 7.31 / 12
+
+            else:  # Boys
+                if label[i] <= (3 / 12):
+                    std_dev[i] = 0.72 / 12
+                elif label[i] <= (6 / 12):
+                    std_dev[i] = 1.13 / 12
+                elif label[i] <= (9 / 12):
+                    std_dev[i] = 1.43 / 12
+                elif label[i] <= (12 / 12):
+                    std_dev[i] = 1.97 / 12
+                elif label[i] <= (18 / 12):
+                    std_dev[i] = 3.52 / 12
+                elif label[i] <= (24 / 12):
+                    std_dev[i] = 3.92 / 12
+                elif label[i] <= (30 / 12):
+                    std_dev[i] = 4.52 / 12
+                elif label[i] <= 3:
+                    std_dev[i] = 5.08 / 12
+                elif label[i] <= 3.5:
+                    std_dev[i] = 5.40 / 12
+                elif label[i] <= 4:
+                    std_dev[i] = 6.66 / 12
+                elif label[i] <= 4.5:
+                    std_dev[i] = 8.36 / 12
+                elif label[i] <= 5:
+                    std_dev[i] = 8.79 / 12
+                elif label[i] <= 6:
+                    std_dev[i] = 9.17 / 12
+                elif label[i] <= 7:
+                    std_dev[i] = 8.91 / 12
+                elif label[i] <= 8:
+                    std_dev[i] = 9.10 / 12
+                elif label[i] <= 9:
+                    std_dev[i] = 9.0 / 12
+                elif label[i] <= 10:
+                    std_dev[i] = 9.79 / 12
+                elif label[i] <= 11:
+                    std_dev[i] = 10.09 / 12
+                elif label[i] <= 12:
+                    std_dev[i] = 10.38 / 12
+                elif label[i] <= 13:
+                    std_dev[i] = 10.44 / 12
+                elif label[i] <= 14:
+                    std_dev[i] = 10.72 / 12
+                elif label[i] <= 15:
+                    std_dev[i] = 11.32 / 12
+                elif label[i] <= 16:
+                    std_dev[i] = 12.86 / 12
+                else:
+                    std_dev[i] = 13.05 / 12
+
+            # Calculate the MAE
+            if predictions[i] < 0: predictions[i] = 0
+            if predictions[i] > 18: predictions[i] = 18
+            abs_err = abs(predictions[i] - label[i])
+            tot_err += abs_err
+
+            # Mark it right if we are within 2 std_devs
+            if abs_err <= (std_dev[i] * 2):  # If difference is less than 2 stddev
+                right += 1
+
+        accuracy = (right / total) * 100  # Calculate the percent correct
+        mae = (tot_err / total)
+
+        return accuracy, mae
+
+
     def skmetrics_results(self):
         pass
 
