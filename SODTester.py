@@ -5,9 +5,13 @@ mean absolute error, mean squared error, DICE score, sensitivity, specificity, A
 
 """
 
+import os, glob
+
 import matplotlib.pyplot as plt
 import numpy as np
 import sklearn.metrics as skm
+import pandas as pd
+
 from scipy import interp
 
 
@@ -309,6 +313,44 @@ class SODTester():
         """
 
         return np.eye(int(n_classes))[labels.astype(np.int16)]
+
+
+    def save_to_csv(self, patients, predictions, step, error, filename='submission'):
+        """
+        Saves the patient dictionaries to a CSV
+        :param patients: the dictionary of patient indexes
+        :param predictions: the predicted outputs of the network
+        :param step: the current step. If not 0 then we will be appending the csv not making a new one
+        :param error: the column with the error
+        :param filename: the filename to save
+        :return:
+        """
+
+        # Make dummy dictionary
+        dictionary = {}
+
+        # Loop through the dictionary
+        for idx, array in patients.items():
+
+            # no need to save the image data
+            if idx == 'image': continue
+
+            # append new dictionary
+            dictionary[idx] = np.squeeze(np.array(array))
+
+        # Append the predictions
+        dictionary['predictions'] = predictions
+        dictionary['error'] = error
+
+        # Now create the data frame and save the csv
+        df = pd.DataFrame(dictionary)
+
+        # Append if this is not the first step
+        if step != 0:
+            with open(filename, 'a') as f: df.to_csv(f, index=True, index_label='id', header=False)
+
+        # Otherwise make a new CSV
+        else: df.to_csv(filename, index=True, index_label='id')
 
 
     def display_ROC_graph(self, plot=False):
