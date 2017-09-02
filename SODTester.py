@@ -347,10 +347,10 @@ class SODTester():
 
         # Append if this is not the first step
         if step != 0:
-            with open(filename, 'a') as f: df.to_csv(f, index=True, index_label='id', header=False)
+            with open(filename, 'a') as f: df.to_csv(f, index=True, index_label='Batch_Num', header=False)
 
         # Otherwise make a new CSV
-        else: df.to_csv(filename, index=True, index_label='id')
+        else: df.to_csv(filename, index=True, index_label='Batch_Num')
 
 
     def display_ROC_graph(self, plot=False):
