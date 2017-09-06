@@ -47,7 +47,7 @@ class SODTester():
      Performance Metrics
     """
 
-    def mean_absolute_error(self, prediction, labels, display=True):
+    def calculate_mean_absolute_error(self, prediction, labels, display=True):
 
         """
         Calculates the MAE between predictions and labels
@@ -69,7 +69,7 @@ class SODTester():
 
         # Print the summary
         np.set_printoptions(precision=1)  # use numpy to print only the first sig fig
-        if display: print('MAE: %s\n Pred: %s\nReal: %s' % (MAE, predictions[to_print], label[to_print]))
+        if display: print('MAE: %s\n Pred: %s\nReal: %s' % (MAE, predictions[:to_print], label[:to_print]))
 
         # Append right
         self.right += MAE
@@ -78,7 +78,7 @@ class SODTester():
         return MAE
 
 
-    def get_accuracy_regression(self, Epoch, display=True):
+    def retreive_accuracy_regression(self, Epoch, display=True):
 
         """
         Retreive the accuracy so far
@@ -93,8 +93,11 @@ class SODTester():
         # Print the final accuracies and MAE if requested
         if display:
             print('-' * 70)
-            print('--- EPOCH: %s MAE: %.4f (Old Best: %.1f @ %s) ---'
+            print('--- EPOCH: %s MAE: %.3f (Old Best: %.3f @ %s) ---'
                     % (Epoch, self.accuracy, self.best_MAE, self.best_step))
+
+        # Update bests
+        if self.accuracy <= self.best_MAE: sdt.best_step, sdt.best_MAE = Epoch, sdt.MAE
 
         return self.accuracy
 

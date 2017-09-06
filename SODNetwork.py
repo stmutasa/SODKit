@@ -483,7 +483,7 @@ class SODMatrix():
         :param summary: Whether to output a summaryb: 
         :param BN: Batch norm or not
         :param relu: relu or not
-        :param override: to override conv dimensions, if you want to average activations 
+        :param override: to override conv dimensions, if you want to average activations
         :return: result of all of the above. Averaged if overriden
         """
 
@@ -759,7 +759,7 @@ class SODMatrix():
         return loss
 
 
-    def MSE_loss(self, logits, labels, mask_factor=0.0, mask_avg=0.0, mask_norm=0.0, summary=True):
+    def MSE_loss(self, logits, labels, mask_factor=0.0, mask_avg=0.0, mask_norm=0.0, summary=True, debug=False):
         """
         Calculates the mean squared error, made for boneAge linear regressor output.
         :param logits: not really logits but outputs of the network
@@ -784,8 +784,12 @@ class SODMatrix():
         # Convert to row vector
         mask = tf.squeeze(mask)
 
+        # Print debug summary for possible dimensionality issues
+        if debug: print (labels, logits, labels-logits)
+
         # Calculate MSE with the factor multiplied in
-        MSE_loss = tf.reduce_mean(tf.multiply(tf.square(labels - logits), mask))
+        if mask_factor: MSE_loss = tf.reduce_mean(tf.multiply(tf.square(labels - logits), mask))
+        else: MSE_loss = tf.reduce_mean(tf.square(labels - logits))
 
         # Output the summary of the MSE and MAE
         if summary:
