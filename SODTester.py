@@ -97,7 +97,7 @@ class SODTester():
                     % (Epoch, self.accuracy, self.best_MAE, self.best_step))
 
         # Update bests
-        if self.accuracy <= self.best_MAE: sdt.best_step, sdt.best_MAE = Epoch, sdt.MAE
+        if self.accuracy <= self.best_MAE: self.best_step, self.best_MAE = Epoch, self.MAE
 
         return self.accuracy
 

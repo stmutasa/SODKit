@@ -470,7 +470,7 @@ class SODMatrix():
 
 
     def fc7_layer(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5,
-                  summary=True, BN=False, relu=True, override=None):
+                  summary=True, BN=False, relu=True, override=None, pad='VALID'):
 
         """
         Wrapper for implementing an FC layer based on a conv layer
@@ -507,7 +507,7 @@ class SODMatrix():
             reshape = tf.reshape(weights, shape=[height, width, channel, neurons])
 
             # Convolution
-            conv = tf.nn.conv2d(input=X, filter=reshape, strides=[1, 1, 1, 1], padding="VALID", name='Conv')
+            conv = tf.nn.conv2d(input=X, filter=reshape, strides=[1, 1, 1, 1], padding=pad, name='Conv')
 
             # Optional batch norm
             if BN: conv = self.batch_normalization(conv, phase_train, 'Fc7Norm')
