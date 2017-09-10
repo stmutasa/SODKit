@@ -329,7 +329,7 @@ class SODMatrix():
                                           phase_train=phase_train, summary=summary, BN=BN, relu=relu)  # 64x64x64
 
             # Fourth branch, max pool then 1x1 conv:
-            inception4a = tf.nn.max_pool(X, [1, 3, 3, 3, 1], [1, 1, 1, 1, 1], padding)  # 64x64x256
+            inception4a = tf.nn.max_pool3d(X, [1, 3, 3, 3, 1], [1, 1, 1, 1, 1], padding)  # 64x64x256
 
             inception4 = self.convolution_3d('Inception4', inception4a, 1, K, S,
                                           phase_train=phase_train, summary=summary, BN=BN, relu=relu)  # 64x64x64
@@ -378,10 +378,10 @@ class SODMatrix():
         """
 
         # 1st branch, AVG pool
-        avg = tf.nn.avg_pool(X, [1, 2, 2, 2, 1], [1, S, S, S, 1], padding)
+        avg = tf.nn.avg_pool3d(X, [1, 2, 2, 2, 1], [1, S, S, S, 1], padding)
 
         # 2nd branch, max pool
-        maxi = tf.nn.max_pool(X, [1, 2, 2, 2, 1], [1, S, S, S, 1], padding)
+        maxi = tf.nn.max_pool3d(X, [1, 2, 2, 2, 1], [1, S, S, S, 1], padding)
 
         # Concatenate the results
         inception = tf.concat([avg, maxi], -1)
@@ -649,7 +649,7 @@ class SODMatrix():
             # Average outputs if we used an override
             if override:
                 F = conv.get_shape().as_list()[1]
-                conv = tf.nn.avg_pool(conv, [1, F, F, 1], [1, 2, 2, 1], pad)
+                conv = tf.nn.avg_pool(conv, [1, F, F, 1], [1, 2, 2, 1], 'VALID')
 
             # Activation summary
             if summary: self._activation_summary(conv)
@@ -695,7 +695,7 @@ class SODMatrix():
             reshape = tf.reshape(weights, shape=[height, width, depth, channel, neurons])
 
             # Convolution
-            conv = tf.nn.conv2d(input=X, filter=reshape, strides=[1, 1, 1, 1, 1], padding=pad, name='Conv')
+            conv = tf.nn.conv3d(input=X, filter=reshape, strides=[1, 1, 1, 1, 1], padding=pad, name='Conv')
 
             # Optional batch norm
             if BN: conv = self.batch_normalization(conv, phase_train, 'Fc7Norm')
@@ -712,7 +712,7 @@ class SODMatrix():
             # Average outputs if we used an override
             if override:
                 F = conv.get_shape().as_list()[1]
-                conv = tf.nn.avg_pool(conv, [1, F, F, F, 1], [1, 2, 2, 2, 1], pad)
+                conv = tf.nn.avg_pool3d(conv, [1, F, F, F, 1], [1, 2, 2, 2, 1], 'VALID')
 
             # Activation summary
             if summary: self._activation_summary(conv)
