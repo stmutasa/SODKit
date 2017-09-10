@@ -246,6 +246,58 @@ class SODMatrix():
             return conv
 
 
+    def deconvolution_3d(self, scope, X, F, K, S, padding='SAME', phase_train=None,
+                      concat_var=None, out_shape=None, summary=True, BN=True, relu=True):
+        """
+        This is a wrapper for 3D De-convolutions aka fractionally strided convolutions aka transposed convolutions
+        aka upconvolutions aka backwards convolutions
+        :param scope: Scope of the variables created
+        :param X: The input tensor, images or result of prior convolotions
+        :param F: Convolution size
+        :param K: Kernel ( aka channel, aka feature map) size
+        :param S: Stride size
+        :param padding: 'SAME' for padding, 'VALID' for no padding
+        :param phase_train: Whether we are in training or testing mode
+        :param concat_var: The variable aka "skip connection" to concatenate
+        :param summary: whether to produce a tensorboard summary of this layer
+        :param BN: whether to perform batch normalization
+        :param out_shape: The shape of output. if blank just double
+        :return: conv: the result of the convolution
+        """
+
+        with tf.variable_scope(scope) as scope:
+
+            # Set channel size based on input depth
+            C = X.get_shape().as_list()[-1]
+
+            # Xavier init
+            kernel = tf.get_variable('Weights', shape=[F, F, F, K, C], initializer=tf.contrib.layers.xavier_initializer())
+
+            # Define the output shape if not given
+            if out_shape is None:
+                out_shape = X.get_shape().as_list()
+                out_shape[1] *= 2
+                out_shape[2] *= 2
+                out_shape[3] *= 2
+                out_shape[4] = K
+
+            # Perform the deconvolution. output_shape: A 1-D Tensor representing the output shape of the deconvolution op.
+            dconv = tf.nn.conv3d_transpose(X, kernel, output_shape=out_shape, strides=[1, S, S, S, 1], padding=padding)
+
+            # Concatenate along the depth axis
+            conv = tf.concat([concat_var, dconv], axis=-1)
+
+            # Apply the batch normalization. Updates weights during training phase only
+            if BN: conv = self.batch_normalization(conv, phase_train, scope)
+
+            # Relu
+            if relu: conv = tf.nn.relu(conv, name=scope.name)
+
+            # Create a histogram summary and summary of sparsity
+            if summary: self._activation_summary(conv)
+
+            return conv
+
     def inception_layer(self, scope, X, K, S=1, padding='SAME', phase_train=None, summary=True, BN=True, relu=True):
         """
         This function implements an inception layer or "network within a network"
