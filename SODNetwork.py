@@ -65,14 +65,7 @@ class SODMatrix():
             conv = tf.nn.conv2d(X, kernel, [1, S, S, 1], padding=padding)
 
             # Apply the batch normalization. Updates weights during training phase only
-            if BN:
-                conv = tf.cond(phase_train,
-                               lambda: tf.contrib.layers.batch_norm(conv, activation_fn=None, center=True, scale=True,
-                                                            updates_collections=None, is_training=True, reuse=None,
-                                                            scope=scope, decay=0.9, epsilon=1e-5),
-                               lambda: tf.contrib.layers.batch_norm(conv, activation_fn=None, center=True, scale=True,
-                                                            updates_collections=None, is_training=False, reuse=True,
-                                                            scope=scope, decay=0.9, epsilon=1e-5))
+            if BN: conv = self.batch_normalization(conv, phase_train, scope)
 
             # Relu activation
             if relu: conv = tf.nn.relu(conv, name=scope.name)
@@ -86,7 +79,8 @@ class SODMatrix():
             return conv
 
 
-    def convolution_3d(self, scope, X, F, K, S=2, padding='SAME', phase_train=None, summary=True, BN=True, relu=True):
+    def convolution_3d(self, scope, X, F, K, S=2, padding='SAME', phase_train=None,
+                       summary=True, BN=True, relu=True, downsample=False):
         """
         This is a wrapper for 3-dimensional convolutions
         :param scope:
@@ -98,6 +92,8 @@ class SODMatrix():
         :param phase_train: For batch norm implementation
         :param summary: whether to produce a tensorboard summary of this layer
         :param BN: whether to perform batch normalization
+        :param relu: Whether to perform relu
+        :param downsample: Whether to perform a max+avg pool downsample
         :return:
         """
 
@@ -106,6 +102,9 @@ class SODMatrix():
 
         # Set the scope
         with tf.variable_scope(scope) as scope:
+
+            # Set training phase variable
+            self.training_phase = phase_train
 
             # Define the Kernel. Can use Xavier init: contrib.layers.xavier_initializer())
             kernel = tf.get_variable('Weights', shape=[F, F, F, C, K],
@@ -118,17 +117,13 @@ class SODMatrix():
             conv = tf.nn.conv3d(X, kernel, [1, S, S, S, 1], padding=padding)  # Create a 2D tensor with BATCH_SIZE rows
 
             # Apply the batch normalization. Updates weights during training phase only
-            if BN:
-                conv = tf.cond(phase_train,
-                               lambda: tf.contrib.layers.batch_norm(conv, activation_fn=None, center=True, scale=True,
-                                                            updates_collections=None, is_training=True, reuse=None,
-                                                            scope=scope, decay=0.9, epsilon=1e-5),
-                               lambda: tf.contrib.layers.batch_norm(conv, activation_fn=None, center=True, scale=True,
-                                                            updates_collections=None, is_training=False, reuse=True,
-                                                            scope=scope, decay=0.9, epsilon=1e-5))
+            if BN: conv = self.batch_normalization(conv, phase_train, scope)
 
             # Relu activation
             if relu: conv = tf.nn.relu(conv, name=scope.name)
+
+            # If requested, use the avg + max pool downsample operation
+            if downsample: conv = self.incepted_downsample_3d(conv)
 
             # Create a histogram/scalar summary of the conv1 layer
             if summary: self._activation_summary(conv)
@@ -324,6 +319,32 @@ class SODMatrix():
         return inception
 
 
+    def incepted_downsample_3d(self, X, S=2, padding='SAME', summary=True):
+        """
+        This function implements a 3d downsampling layer that utilizes both an average and max pooling operation
+        :param scope:
+        :param X: Output of the previous layer
+        :param S: The degree of downsampling or stride
+        :param padding: SAME or VALID
+        :param summary: whether to produce a tensorboard summary of this layer
+        :return: the layer output after concat
+        """
+
+        # 1st branch, AVG pool
+        avg = tf.nn.avg_pool(X, [1, 2, 2, 2, 1], [1, S, S, S, 1], padding)
+
+        # 2nd branch, max pool
+        maxi = tf.nn.max_pool(X, [1, 2, 2, 2, 1], [1, S, S, S, 1], padding)
+
+        # Concatenate the results
+        inception = tf.concat([avg, maxi], -1)
+
+        # Create a histogram/scalar summary of the conv1 layer
+        if summary: self._activation_summary(inception)
+
+        return inception
+
+
     def res_inc_layer(self, scope, X, F, K, padding='SAME', phase_train=None, summary=True, BN=True, relu=True):
         """
         This is a wrapper for implementing a hybrid residual layer with inception layer as F(x)
@@ -415,14 +436,14 @@ class SODMatrix():
             if K_prob: conv1 = tf.nn.dropout(conv1, K_prob)
 
             # Another Convolution with BN and ReLu
-            conv2 = self.convolution('Conv2', conv1, F, K, 1, 'SAME', phase_train, summary, True, True)
+            conv2 = self.convolution('Conv2', conv1, F, K, 1, padding, phase_train, summary, True, True)
 
             # Second dropout
             if K_prob: conv2 = tf.nn.dropout(conv2, K_prob)
 
             # Final downsampled conv without BN or RELU
-            if DSC: conv = self.convolution('ConvFinal', conv2, F, K, 1, 'SAME', phase_train, summary, False, False, True)
-            else: conv = self.convolution('ConvFinal', conv2, F, K*S, S, 'SAME', phase_train, summary, False, False)
+            if DSC: conv = self.convolution('ConvFinal', conv2, F, K, 1, padding, phase_train, summary, False, False, True)
+            else: conv = self.convolution('ConvFinal', conv2, F, K*S, S, padding, phase_train, summary, False, False)
 
             # Downsample the residual input if we did the conv layer. pool or strided
             #if DSC: X = self.convolution('ResDown', X, 2, K, 1, 'SAME', phase_train, summary, False, False, True)
@@ -445,6 +466,63 @@ class SODMatrix():
                                                                         updates_collections=None, is_training=False,
                                                                         reuse=True,
                                                                         scope='BNRes', decay=0.9, epsilon=1e-5))
+
+            # Relu activation
+            if relu: residual = tf.nn.relu(residual, name=scope.name)
+
+            return residual
+
+
+    def residual_layer_3d(self, scope, X, F, K, S=2, K_prob=None, padding='SAME',
+                       phase_train=None, summary=True, DSC=False, BN=False, relu=False):
+        """
+        This is a wrapper for implementing a stanford style residual layer in 3 dimensions
+        :param scope:
+        :param X: Output of the previous layer, make sure this is not normalized and has no nonlinearity applied
+        :param F: Dimensions of the second convolution in F(x) - the non inception layer one
+        :param K: Feature maps in the inception layer (will be multiplied by 4 during concatenation)
+        :param S: Stride of the convolution, whether to downsample
+        :param k_prob: keep probability for dropout
+        :param padding: SAME or VALID
+        :param phase_train: For batch norm implementation
+        :param summary: whether to produce a tensorboard summary of this layer
+        :param DSC: Whether to perform standard downsample or incepted downsample
+        :param BN: Whether to batch norm. Defaults to false to plug into another residual
+        :param relu: whether to apply a nonlinearity at the end.
+        :return:
+        """
+
+        # Set the scope. Implement a residual layer below
+        with tf.variable_scope(scope) as scope:
+
+            # Start the second conv layer: BN->Relu->Drop->Conv->BN->Relu->dropout
+            conv1 = self.batch_normalization(X, phase_train, scope)
+
+            # ReLU
+            conv1 = tf.nn.relu(conv1, scope.name)
+
+            # Dropout
+            if K_prob: conv1 = tf.nn.dropout(conv1, K_prob)
+
+            # Another Convolution with BN and ReLu
+            conv2 = self.convolution_3d('Conv2', conv1, F, K, 1, padding, phase_train, summary, True, True)
+
+            # Second dropout
+            if K_prob: conv2 = tf.nn.dropout(conv2, K_prob)
+
+            # Final downsampled conv without BN or RELU
+            if DSC: conv = self.convolution_3d('ConvFinal', conv2, F, K, 1, padding, phase_train, summary, False, False, True)
+            else: conv = self.convolution_3d('ConvFinal', conv2, F, K*S, S, padding, phase_train, summary, False, False)
+
+            # Downsample the residual input if we did the conv layer. pool or strided
+            if DSC: X = self.incepted_downsample_3d(X)
+            elif S>1: X = self.convolution_3d('ResDown', X, 2, K*S, S, phase_train=phase_train, BN=False, relu=False)
+
+            # The Residual block
+            residual = tf.add(conv, X)
+
+            # Apply the batch normalization. Updates weights during training phase only
+            if BN: residual = self.batch_normalization(residual, phase_train, 'BNRes')
 
             # Relu activation
             if relu: residual = tf.nn.relu(residual, name=scope.name)
@@ -524,7 +602,70 @@ class SODMatrix():
             # Average outputs if we used an override
             if override:
                 F = conv.get_shape().as_list()[1]
-                conv = tf.nn.avg_pool(conv, [1, F, F, 1], [1, 2, 2, 1], 'VALID')
+                conv = tf.nn.avg_pool(conv, [1, F, F, 1], [1, 2, 2, 1], pad)
+
+            # Activation summary
+            if summary: self._activation_summary(conv)
+
+            return tf.squeeze(conv)
+
+
+    def fc7_layer_3d(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5,
+                  summary=True, BN=False, relu=True, override=None, pad='VALID'):
+
+        """
+        Wrapper for implementing a 3D FC layer based on a conv layer
+        :param scope: Scopename of the layer
+        :param X: Input of the prior layer
+        :param neurons: Desired number of neurons in the layer
+        :param dropout: Whether to implement dropout here
+        :param phase_train: Are we in testing or training phase = only relevant for dropout
+        :param keep_prob: if doing dropout, the keep probability
+        :param summary: Whether to output a summaryb: 
+        :param BN: Batch norm or not
+        :param relu: relu or not
+        :param override: to override conv dimensions, if you want to average activations
+        :return: result of all of the above. Averaged if overriden
+        """
+
+        # The Fc7 layer scope
+        with tf.variable_scope(scope) as scope:
+
+            # Retreive the size of the last layer
+            batch_size, height, width, depth, channel = X.get_shape().as_list()
+            if override: height, width , depth = override, override, override
+
+            # Initialize the weights
+            weights = tf.get_variable('weights', shape=[height * width * depth * channel, neurons])
+
+            # Add to the collection of weights
+            tf.add_to_collection('weights', weights)
+
+            # Initialize the biases
+            biases = tf.get_variable('biases', shape=[neurons])
+
+            # Reshape weights
+            reshape = tf.reshape(weights, shape=[height, width, depth, channel, neurons])
+
+            # Convolution
+            conv = tf.nn.conv2d(input=X, filter=reshape, strides=[1, 1, 1, 1, 1], padding=pad, name='Conv')
+
+            # Optional batch norm
+            if BN: conv = self.batch_normalization(conv, phase_train, 'Fc7Norm')
+
+            # Add biases
+            conv = tf.nn.bias_add(conv, biases, name='Bias')
+
+            # Optional relu
+            if relu: conv = tf.nn.relu(conv, name=scope.name)
+
+            # Dropout here if wanted and in train phase
+            if phase_train and dropout: conv = tf.nn.dropout(conv, keep_prob)
+
+            # Average outputs if we used an override
+            if override:
+                F = conv.get_shape().as_list()[1]
+                conv = tf.nn.avg_pool(conv, [1, F, F, F, 1], [1, 2, 2, 2, 1], pad)
 
             # Activation summary
             if summary: self._activation_summary(conv)
