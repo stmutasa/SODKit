@@ -298,6 +298,7 @@ class SODMatrix():
 
             return conv
 
+
     def inception_layer(self, scope, X, K, S=1, padding='SAME', phase_train=None, summary=True, BN=True, relu=True):
         """
         This function implements an inception layer or "network within a network"
