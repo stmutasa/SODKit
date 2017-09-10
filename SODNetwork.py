@@ -293,6 +293,53 @@ class SODMatrix():
             return inception
 
 
+    def inception_layer_3d(self, scope, X, K, S=1, padding='SAME', phase_train=None, summary=True, BN=True, relu=True):
+        """
+        This function implements a 3D inception layer or "network within a network"
+        :param scope:
+        :param X: Output of the previous layer
+        :param K: Feature maps in the inception layer (will be multiplied by 4 during concatenation)
+        :param S: Stride
+        :param padding:
+        :param phase_train: For batch norm implementation
+        :param summary: whether to produce a tensorboard summary of this layer
+        :param BN: whether to perform batch normalization
+        :return: the inception layer output after concat
+        """
+
+        # Implement an inception layer here ----------------
+        with tf.variable_scope(scope) as scope:
+
+            # First branch, 1x1x64 convolution
+            inception1 = self.convolution_3d('Inception1', X, 1, K, S,
+                                          phase_train=phase_train, summary=summary, BN=BN, relu=relu)  # 64x64x64
+
+            # Second branch, 1x1 convolution then 3x3 convolution
+            inception2a = self.convolution_3d('Inception2a', X, 1, 1, 1,
+                                           phase_train=phase_train, summary=summary)  # 64x64x1
+
+            inception2 = self.convolution_3d('Inception2', inception2a, 3, K, S,
+                                          phase_train=phase_train, summary=summary, BN=BN, relu=relu)  # 64x64x64
+
+            # Third branch, 1x1 convolution then 5x5 convolution:
+            inception3a = self.convolution_3d('Inception3a', X, 1, 1, 1,
+                                           phase_train=phase_train, summary=summary)  # 64x64x1
+
+            inception3 = self.convolution_3d('Inception3', inception3a, 5, K, S,
+                                          phase_train=phase_train, summary=summary, BN=BN, relu=relu)  # 64x64x64
+
+            # Fourth branch, max pool then 1x1 conv:
+            inception4a = tf.nn.max_pool(X, [1, 3, 3, 3, 1], [1, 1, 1, 1, 1], padding)  # 64x64x256
+
+            inception4 = self.convolution_3d('Inception4', inception4a, 1, K, S,
+                                          phase_train=phase_train, summary=summary, BN=BN, relu=relu)  # 64x64x64
+
+            # Concatenate the results for dimension of 64,64,256
+            inception = tf.concat([inception1, inception2, inception3, inception4], axis=-1)
+
+            return inception
+
+
     def incepted_downsample(self, X, S=2, padding='SAME', summary=True):
         """
         This function implements a downsampling layer that utilizes both an average and max pooling operation
