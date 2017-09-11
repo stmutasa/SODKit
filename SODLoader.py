@@ -1606,3 +1606,23 @@ class SODLoader():
                 for key in remove_list:
                     keys.remove(key)
 
+
+    def return_nonzero_pixel_ratio(sef, input, depth=3, dim_3d=False):
+        """
+        Returns the proportion of pixels that are zero
+        :param input: numpy array of the image
+        :param depth: number of color channes
+        :param dim_3d: whether its 3 dimensional
+        :return: fraction of pixels that are 0
+        """
+
+        # get total pixel count
+        tot_pixels = input.shape[0] * input.shape[1]
+
+        # Convert image to grayscale
+        gray_image = cv2.cvtColor(input, cv2.COLOR_BGR2GRAY)
+
+        # Count the fraction of pixels that arent 0
+        non_zero = np.sum(gray_image.astype(np.bool)) / tot_pixels
+
+        return non_zero
