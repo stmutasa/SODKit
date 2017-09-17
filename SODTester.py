@@ -62,7 +62,8 @@ class SODTester():
         label = np.squeeze(labels.astype(np.float32))
 
         # How many to print
-        to_print = min(len(label), 15)
+        try: to_print = min(len(label), 15)
+        except: to_print = 1
 
         # Calculate MAE
         MAE = np.mean(np.absolute((predictions - label)))
@@ -88,18 +89,18 @@ class SODTester():
         """
 
         # Calculate final MAE and ACC
-        self.accuracy = self.right / self.total
+        self.MAE = self.right / self.total
 
         # Print the final accuracies and MAE if requested
         if display:
             print('-' * 70)
             print('--- EPOCH: %s MAE: %.3f (Old Best: %.3f @ %s) ---'
-                    % (Epoch, self.accuracy, self.best_MAE, self.best_step))
+                    % (Epoch, self.MAE, self.best_MAE, self.best_step))
 
         # Update bests
-        if self.accuracy <= self.best_MAE: self.best_step, self.best_MAE = Epoch, self.MAE
+        if self.MAE <= self.best_MAE: self.best_step, self.best_MAE = Epoch, self.MAE
 
-        return self.accuracy
+        return self.MAE
 
 
     def calculate_metrics(self, logits, labels, positive_class, step, display=True):
