@@ -319,6 +319,31 @@ class SODTester():
         return np.eye(int(n_classes))[labels.astype(np.int16)]
 
 
+    def save_dic_csv(self, dictionary, filename='Submission', append=False, transpose=True):
+        """
+        Saves a ready made dictionary to CSV
+        :param dictionary: the input dictionary
+        :param filename: filename to save
+        :param append: whether to append an existing csv or make a new one
+        :param transpose: whether to transpose the dictionary
+        :return:
+        """
+
+        # Now create the data frame and save the csv
+        df = pd.DataFrame(dictionary)
+
+        # Transpose the data frame
+        if transpose: df.transpose()
+
+        # Append if the flag is determined
+        if append:
+            with open(filename, 'a') as f:  df.to_csv(f, index=True, index_label='Batch_Num', header=False)
+
+        # Otherwise make a new CSV
+        else: df.to_csv(filename, index=True, index_label='Lymph_Node', )
+
+
+
     def save_to_csv(self, patients, predictions, step, error, filename='submission'):
         """
         Saves the patient dictionaries to a CSV
