@@ -1504,6 +1504,32 @@ class SODLoader():
         return volume
 
 
+    def normalize_dictionary(self, data, dims, crop=False, range=0.1):
+        """
+        Crops all the data in a 2D input dictionary, assuming its under the index ['data']
+        :param data: input dictionary
+        :param dims: dimensions of the image
+        :param crop: crop the normalization or not
+        :param range: crop range
+        :return: 
+        """
+
+        # Initialize normalization images array
+        normz = np.zeros(shape=(len(data), dims, dims), dtype=np.float32)
+
+        # Normalize all the images. First retreive the images
+        for key, dict in data.items(): normz[key, :, :] = dict['data']
+
+        # Now normalize the whole batch
+        print('Batch Norm: %s , Batch STD: %s' % (np.mean(normz), np.std(normz)))
+        normz = self.normalize(normz, crop, range)
+
+        # Return the normalized images to the dictionary
+        for key, dict in data.items(): dict['data'] = normz[key]
+
+        return data
+
+
     """
          Tool functions: Most of these are hidden
     """
