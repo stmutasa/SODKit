@@ -1626,3 +1626,13 @@ class SODLoader():
         non_zero = np.sum(gray_image.astype(np.bool)) / tot_pixels
 
         return non_zero
+
+
+    def convert_grayscale(self, image):
+        """
+        Converts an image to grayscale
+        :param image: input image numpy array
+        :return: gray image
+        """
+
+        return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
