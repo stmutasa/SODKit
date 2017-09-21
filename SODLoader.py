@@ -1504,6 +1504,90 @@ class SODLoader():
         return volume
 
 
+    def normalize_dictionary(self, data, dims, crop=False, range=0.1):
+        """
+        Crops all the data in a 2D input dictionary, assuming its under the index ['data']
+        :param data: input dictionary
+        :param dims: dimensions of the image
+        :param crop: crop the normalization or not
+        :param range: crop range
+        :return: 
+        """
+
+        # Initialize normalization images array
+        normz = np.zeros(shape=(len(data), dims, dims), dtype=np.float32)
+
+        # Normalize all the images. First retreive the images
+        for key, dict in data.items(): normz[key, :, :] = dict['data']
+
+        # Now normalize the whole batch
+        print('Batch Norm: %s , Batch STD: %s' % (np.mean(normz), np.std(normz)))
+        normz = self.normalize(normz, crop, range)
+
+        # Return the normalized images to the dictionary
+        for key, dict in data.items(): dict['data'] = normz[key]
+
+        return data
+
+
+    def save_tfrecords(self, data, xvals, test_size, file_root='data/Data'):
+
+        """
+        Saves the dictionary given to a protocol buffer in tfrecords format
+        :param data: Input dictionary
+        :param xvals: number of even files to save. If ==2 save 'test_size' test set and a train set
+        :param test_size: if xvals == 2 then this is the number of examples to put in the test set
+        :param file_root: The first part of the filename to save. This includes the directory
+        :return: not a damn thing
+        """
+
+        # generate x number of writers depending on the cross validations
+        writer = []
+
+        # Open the file writers
+        for z in range(xvals):
+
+            # Define writer name
+            if xvals == 2:
+                if z == 0: filename = (file_root + '_Test' + '.tfrecords')
+                else: filename = (file_root + '_Train' + '.tfrecords')
+
+            else: filename = (file_root + str(z) + '.tfrecords')
+            writer.append(tf.python_io.TFRecordWriter(filename))
+
+        # Loop through each example and append the protobuf with the specified features
+        if xvals == 2:
+
+            # First for the special case
+            tests = 0
+
+            for key, values in data.items():
+
+                # Serialize to string
+                example = tf.train.Example(features=tf.train.Features(feature=self.create_feature_dict(values, key)))
+
+                # Save this index as a serialized string in the protobuf
+                if tests < test_size: writer[0].write(example.SerializeToString())
+                else: writer[1].write(example.SerializeToString())
+                tests += 1
+
+        else:
+
+            # Now for every other case
+            z = 0
+
+            for key, values in data.items():
+                # Serialize to string
+                example = tf.train.Example(features=tf.train.Features(feature=self.create_feature_dict(values, key)))
+
+                # Save this index as a serialized string in the protobuf
+                writer[(z % xvals)].write(example.SerializeToString())
+                z += 1
+
+        # Close the file after writing
+        for y in range(xvals): writer[y].close()
+
+
     """
          Tool functions: Most of these are hidden
     """
