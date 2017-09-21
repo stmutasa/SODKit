@@ -1504,7 +1504,7 @@ class SODLoader():
         return volume
 
 
-    def normalize_dictionary(self, data, dims, crop=False, range=0.1):
+    def normalize_dictionary(self, data, dims, channels=0, crop=False, range=0.1):
         """
         Crops all the data in a 2D input dictionary, assuming its under the index ['data']
         :param data: input dictionary
@@ -1515,7 +1515,8 @@ class SODLoader():
         """
 
         # Initialize normalization images array
-        normz = np.zeros(shape=(len(data), dims, dims), dtype=np.float32)
+        if channels>1: normz = np.zeros(shape=(len(data), dims, dims, channels), dtype=np.float32)
+        else: normz = np.zeros(shape=(len(data), dims, dims), dtype=np.float32)
 
         # Normalize all the images. First retreive the images
         for key, dict in data.items(): normz[key, :, :] = dict['data']
@@ -1720,3 +1721,21 @@ class SODLoader():
         """
 
         return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+
+    def calculate_image_mean_dict(self, data, index):
+        """
+        Prints out the mean and STD of an image set in a dictionary
+        :param data: the input dictionary
+        :param index: The index name of the images you wish to evaluate
+        :return:
+        """
+
+        # Calculate dict norm
+        mean, std, num = 0, 0, 0
+        for key, dict in data.items():
+            mean += np.mean(dict[index])
+            std += np.std(dict[index])
+            num += 1
+
+        print('Mean %s, Std: %s' % ((mean / num), (std / num)))
