@@ -1618,7 +1618,7 @@ class SODLoader():
         for key, feature in data_to_write.items():
 
             # If this is our Data array, use the tostring() method.
-            if key == 'data':
+            if 'data' in key:
                 feature_dict_write[key] = self._bytes_feature(feature.tobytes())  #
 
             else:  # Otherwise convert to a string and encode as bytes to pass on
