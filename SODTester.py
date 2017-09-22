@@ -117,7 +117,12 @@ class SODTester():
 
         # Retreive and print the labels and logits
         label = np.squeeze(labels.astype(np.int8))
-        logit = np.squeeze(np.argmax(logits.astype(np.float), axis=1))
+
+        # Try/if statement for cases with one dimensional logit matrix (one example)
+        try: logit = np.squeeze(np.argmax(logits.astype(np.float), axis=1))
+        except:
+            logit = np.expand_dims(logits.astype(np.float), 0)
+            logit = np.squeeze(np.argmax(logit, axis=1))
 
         # First calculate AUC
         self.AUC += skm.roc_auc_score(label, logit)
