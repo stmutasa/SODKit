@@ -247,9 +247,8 @@ class SODTester():
 
             # Display one per class
             for z in range (n_classes): print ('Class %s: %.3f --- '%(z, self.roc_auc[z]), end='')
-            print ('Micro AUC: %.3f, Macro AUC: %.3f' %(self.roc_auc['micro'], self.roc_auc["macro"]))
-            print ('Acc: %.3f %%' %self.accuracy)
-
+            print ('Micro AUC: %.3f, Macro AUC: %.3f, ACC: %.2f'
+                   %(self.roc_auc['micro'], self.roc_auc["macro"], self.accuracy*100))
 
     def retreive_metrics_classification(self, Epoch, display=True):
 
