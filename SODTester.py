@@ -163,7 +163,7 @@ class SODTester():
             print('Patient %s Preds: %s' % (step, logit[:to_print]))
 
 
-    def calculate_multiclass_metrics(self, logitz, labelz, step, n_classes, display=True):
+    def calculate_multiclass_metrics(self, logitz, labelz, step, n_classes, display=True, individual=False):
         """
         Calculates the metrics for a multiclass problem
         :param logits: raw logits = will be softmaxed
@@ -171,6 +171,7 @@ class SODTester():
         :param step: the current step
         :param n_classes: number of total classes
         :param display: whether to print a summary
+        :param individual: print individual outputs or not
         :return:
         """
 
@@ -220,10 +221,13 @@ class SODTester():
         for z in range(len(label)):
 
             # If we got this right, make it right
-            if label[z] == logit[z]: self.right += 1
+            if int(label[z]) == int(logit[z]): self.right += 1
 
         # Increment total
         self.total += len(label)
+
+        # calc accuracy
+        self.accuracy = float(self.right/self.total)
 
         # Print Summary if wanted
         if display:
@@ -236,9 +240,15 @@ class SODTester():
             print('Patient %s Class: %s' % (step, label[:to_print]))
             print('Patient %s Preds: %s' % (step, logit[:to_print]))
 
+            # Print individual
+            if individual:
+                for z in range(len(label)): print(label[z], '=', logit[z], end=' | ')
+                print (' ')
+
             # Display one per class
             for z in range (n_classes): print ('Class %s: %.3f --- '%(z, self.roc_auc[z]), end='')
             print ('Micro AUC: %.3f, Macro AUC: %.3f' %(self.roc_auc['micro'], self.roc_auc["macro"]))
+            print ('Acc: %.3f %%' %self.accuracy)
 
 
     def retreive_metrics_classification(self, Epoch, display=True):
@@ -346,7 +356,6 @@ class SODTester():
 
         # Otherwise make a new CSV
         else: df.to_csv(filename, index=True, index_label='Lymph_Node', )
-
 
 
     def save_to_csv(self, patients, predictions, step, error, filename='submission'):
