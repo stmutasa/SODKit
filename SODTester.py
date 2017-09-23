@@ -163,6 +163,91 @@ class SODTester():
             print('Patient %s Preds: %s' % (step, logit[:to_print]))
 
 
+    def calc_multiclass_square_metrics(self, logits, labels, Epoch, n_classes):
+        """
+        Calculates and displays SN and specificity of multiclass labels.
+        :param logits:
+        :param labels:
+        :param Epoch:
+        :param n_classes:
+        :return:
+        """
+
+        # Retreive and print the labels and logits
+        label = np.squeeze(labels.astype(np.int8))
+
+        # Try/if statement for cases with one dimensional logit matrix (one example)
+        try:
+            logit = np.squeeze(np.argmax(logits.astype(np.float), axis=1))
+        except:
+            logit = np.expand_dims(logits.astype(np.float), 0)
+            logit = np.squeeze(np.argmax(logit, axis=1))
+
+        # Iterate over the number of classes
+        for positive_class in range(n_classes):
+
+            # Initialize counters
+            right, TP, FN, TN, FaP = 0,0,0,0,0
+            sensitivity, specificity, PPV, NPV = 0,0,0,0
+
+            #  Retreive metrics
+            for z in range(len(label)):
+
+                # If we got this right, make it right
+                if label[z] == logit[z]: right += 1
+
+                # Metrics for when the ground truth is positive
+                if label[z] == positive_class:
+
+                    # Get metrics
+                    if label[z] == logit[z]: TP += 1
+                    if label[z] != logit[z]: FN += 1
+
+                # Metrics for when the ground truth is negative
+                if label[z] != positive_class:
+
+                    # Get metrics
+                    if label[z] == logit[z]: TN += 1
+                    if label[z] != logit[z]: FaP += 1
+
+            # Now calculate this class' scores
+            try: sensitiviy = TP / (TP + FN)
+            except: sensitiviy = 0
+
+            try: specificity = TN / (TN + FaP)
+            except: specificity = 0
+
+            try: PPV = TP / (TP + FaP)
+            except: PPV = 0
+
+            try: NPV = TN / (TN + FN)
+            except: PPV = 0
+
+            # Accuracy
+            accuracy = 100 * right / len(label)
+
+            # Print
+            print('--- Class %s EPOCH: %s, ACC: %.2f, SN: %.3f, SP: %.3f ---'
+                  % (positive_class, Epoch, accuracy, sensitiviy, specificity), end=' | ')
+            print('--- True Pos: %s, False Pos: %s, True Neg: %s, False Neg: %s ---'
+                  % (TP, FaP, TN, FN))
+
+            # Finally update the class tracker
+            self.TP += TP
+            self.TN += TN
+            self.FP = FaP
+            self.FN += FN
+
+        # Overall SN and SP
+        try: self.sensitiviy = self.TP / (self.TP + self.FN)
+        except: self.sensitiviy = 0
+
+        try: self.specificity = self.TN / (self.TN + self.FP)
+        except: self.specificity = 0
+
+        print ('--- Overall Sensitivity: %.3f, Specificity: %.3f' %(self.sensitiviy, self.specificity))
+
+
     def calculate_multiclass_metrics(self, logitz, labelz, step, n_classes, display=True, individual=False):
         """
         Calculates the metrics for a multiclass problem
@@ -249,6 +334,7 @@ class SODTester():
             for z in range (n_classes): print ('Class %s: %.3f --- '%(z, self.roc_auc[z]), end='')
             print ('Micro AUC: %.3f, Macro AUC: %.3f, ACC: %.2f'
                    %(self.roc_auc['micro'], self.roc_auc["macro"], self.accuracy*100))
+
 
     def retreive_metrics_classification(self, Epoch, display=True):
 
