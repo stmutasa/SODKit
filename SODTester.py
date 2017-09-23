@@ -227,8 +227,8 @@ class SODTester():
             accuracy = 100 * right / len(label)
 
             # Print
-            print('--- Class %s EPOCH: %s, ACC: %.2f, SN: %.3f, SP: %.3f ---'
-                  % (positive_class, Epoch, accuracy, sensitiviy, specificity), end=' | ')
+            print('--- Class %s ACC: %.2f, SN: %.3f, SP: %.3f, PPV: %.3f, NPV: %.3f ---'
+                  % (positive_class, accuracy, sensitiviy, specificity, PPV, NPV), end=' | ')
             print('--- True Pos: %s, False Pos: %s, True Neg: %s, False Neg: %s ---'
                   % (TP, FaP, TN, FN))
 
