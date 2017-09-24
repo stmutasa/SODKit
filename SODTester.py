@@ -193,9 +193,6 @@ class SODTester():
             #  Retreive metrics
             for z in range(len(label)):
 
-                # If we got this right, make it right
-                if label[z] == logit[z]: right += 1
-
                 # Metrics for when the ground truth is positive
                 if label[z] == positive_class:
 
@@ -207,8 +204,8 @@ class SODTester():
                 if label[z] != positive_class:
 
                     # Get metrics
-                    if label[z] == logit[z]: TN += 1
-                    if label[z] != logit[z]: FaP += 1
+                    if logit[z] != positive_class: TN += 1
+                    if logit[z] == positive_class: FaP += 1
 
             # Now calculate this class' scores
             try: sensitiviy = TP / (TP + FN)
@@ -224,7 +221,7 @@ class SODTester():
             except: PPV = 0
 
             # Accuracy
-            accuracy = 100 * right / len(label)
+            accuracy = 100 * (TP+TN) / len(label)
 
             # Print
             print('--- Class %s ACC: %.2f, SN: %.3f, SP: %.3f, PPV: %.3f, NPV: %.3f ---'
