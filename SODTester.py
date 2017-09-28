@@ -405,6 +405,52 @@ class SODTester():
         return softmax
 
 
+    def combine_predictions(self, ground_truth, predictions, unique_ID, batch_size):
+        """
+        Combines multi parametric predictions into one group
+        :param ground_truth:
+        :param predictions:
+        :param unique_ID:
+        :param batch_size:
+        :return:
+        """
+
+        # Convert to numpy arrays
+        predictions, label = np.squeeze(predictions.astype(np.float)), np.squeeze(ground_truth.astype(np.float))
+        serz = np.squeeze(unique_ID)
+
+        # The dictionary to return
+        data = {}
+
+        # add up the predictions
+        for z in range(batch_size):
+
+            # If we already have the entry then just append
+            if serz[z] in data:
+                data[serz[z]]['log1'] = data[serz[z]]['log1'] + predictions[z]
+                data[serz[z]]['total'] += 1
+            else:
+                data[serz[z]] = {'label': label[z], 'log1': predictions[z], 'total': 1, 'avg': None}
+
+        # Initialize new labels and logits
+        logga, labba = [], []
+
+        # Combine the data
+        for idx, dic in data.items():
+
+            # Calculate the new average
+            avg = np.asarray(dic['log1']) / dic['total']
+
+            # Append to the new arrays
+            labba.append(dic['label'])
+            logga.append(np.squeeze(avg))
+
+            # add to the dictionary
+            dic['avg'] = np.squeeze(avg)
+
+        return data, labba, logga
+
+
     def make_one_hot(self, n_classes, labels):
         """
         Makes the input array one HOT encoded
