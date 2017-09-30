@@ -1091,7 +1091,7 @@ class SODLoader():
          Utility functions: Random tools for help
     """
 
-    def largest_blob(self, img, vol=None):
+    def largest_blob(self, img):
         """
         This finds the biggest blob in a 2D or 3D volume and returns the center of the blob
         :param img: the binary input volume
@@ -1118,6 +1118,55 @@ class SODLoader():
 
             # Return the parts of the label equal to the 2nd biggest blob
             return labels, cn
+
+        else:
+            return img
+
+
+    def all_blobs(self, img):
+
+        """
+        This finds all of the blobs in a 3D volume and returns them along with the center locations
+        :param img: the binary input volume
+        :return: label binary volume with each blob labeled 1 - n, centers, blob_sizes, blob_count
+        """
+
+        # Only work if a mask actually exists
+        if np.max(img) > 0:
+
+            # Labels all the blobs of connected pixels
+            labels = morphology.label(img)
+
+            # Counts the number of ocurences of each value minus 0 which is always the most
+            blob_sizes = np.bincount(labels.flatten())[1:]
+
+            # Gets the amount of blobs
+            blob_count = blob_sizes.shape[0]
+
+            # Define array of blobs and centers
+            centers = []
+
+            # Loop through and get all the labels
+            for z in range(blob_count):
+
+                # Mark the blob for this pixel value (+1 from array index)
+                label_temp = (labels == (z+1))
+
+                # Find the center of mass
+                cn = scipy.measurements.center_of_mass(label_temp)
+
+                # Generate center based on 2D or 3D
+                if labels.ndim == 3: cn = [int(cn[0]), int(cn[1]), int(cn[2])]
+                else: cn = [int(cn[0]), int(cn[1])]
+
+                # Append
+                centers.append(cn)
+
+                # Delete
+                del label_temp, cn
+
+            # Return the array of labels and centers
+            return labels, centers, blob_sizes, blob_count
 
         else:
             return img
