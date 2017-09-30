@@ -1086,7 +1086,7 @@ class SODMatrix():
         :return: conv: the normalized convolution
         """
 
-        return tf.layers.batch_normalization(conv, training=phase_train)
+        return tf.layers.batch_normalization(conv, training=phase_train, momentum=0.98)
 
 
     def transformer(self, U, theta, out_size, name='SpatialTransformer', **kwargs):
