@@ -56,7 +56,7 @@ class SODMatrix():
 
             # Define the Kernel. Can use Xavier init: contrib.layers.xavier_initializer())
             kernel = tf.get_variable('Weights', shape=[F, F, C, K],
-                                     initializer=tf.truncated_normal_initializer)
+                                     initializer=tf.contrib.layers.variance_scaling_initializer())
 
             # Add to the weights collection
             tf.add_to_collection('weights', kernel)
@@ -108,7 +108,7 @@ class SODMatrix():
 
             # Define the Kernel. Can use Xavier init: contrib.layers.xavier_initializer())
             kernel = tf.get_variable('Weights', shape=[F, F, F, C, K],
-                                     initializer=tf.contrib.layers.xavier_initializer())
+                                     initializer=tf.contrib.layers.variance_scaling_initializer())
 
             # Add to the weights collection
             tf.add_to_collection('weights', kernel)
@@ -154,7 +154,7 @@ class SODMatrix():
 
                 # Define the Kernel. Can use Xavier init: contrib.layers.xavier_initializer())
                 kernel = tf.get_variable('Weights', shape=[F, F, C, K],
-                                         initializer=tf.contrib.layers.xavier_initializer())
+                                         initializer=tf.contrib.layers.variance_scaling_initializer())
 
                 # Add to the weights collection
                 tf.add_to_collection('weights', kernel)
@@ -163,18 +163,7 @@ class SODMatrix():
                 conv = tf.nn.depthwise_conv2d(X, kernel, [1, S, S, 1], padding=padding)
 
                 # Apply the batch normalization. Updates weights during training phase only
-                if BN:
-                    conv = tf.cond(phase_train,
-                                   lambda: tf.contrib.layers.batch_norm(conv, activation_fn=None, center=True,
-                                                                        scale=True,
-                                                                        updates_collections=None, is_training=True,
-                                                                        reuse=None,
-                                                                        scope=scope, decay=0.9, epsilon=1e-5),
-                                   lambda: tf.contrib.layers.batch_norm(conv, activation_fn=None, center=True,
-                                                                        scale=True,
-                                                                        updates_collections=None, is_training=False,
-                                                                        reuse=True,
-                                                                        scope=scope, decay=0.9, epsilon=1e-5))
+                if BN: conv = self.batch_normalization(conv, phase_train, 'DWC_Norm')
 
                 # Relu activation
                 if relu: conv = tf.nn.relu(conv, name=scope.name)
@@ -210,7 +199,8 @@ class SODMatrix():
             C = X.get_shape().as_list()[3]
 
             # Xavier init
-            kernel = tf.get_variable('Weights', shape=[F, F, K, C], initializer=tf.contrib.layers.xavier_initializer())
+            kernel = tf.get_variable('Weights', shape=[F, F, K, C],
+                                     initializer=tf.contrib.layers.variance_scaling_initializer())
 
             # Define the output shape if not given
             if out_shape is None:
@@ -226,16 +216,7 @@ class SODMatrix():
             conv = tf.concat([concat_var, dconv], axis=3)
 
             # Apply the batch normalization. Updates weights during training phase only
-            if BN:
-                conv = tf.cond(phase_train,
-                               lambda: tf.contrib.layers.batch_norm(conv, activation_fn=None, center=True, scale=True,
-                                                                    updates_collections=None, is_training=True,
-                                                                    reuse=None,
-                                                                    scope=scope, decay=0.9, epsilon=1e-5),
-                               lambda: tf.contrib.layers.batch_norm(conv, activation_fn=None, center=True, scale=True,
-                                                                    updates_collections=None, is_training=False,
-                                                                    reuse=True,
-                                                                    scope=scope, decay=0.9, epsilon=1e-5))
+            if BN: conv = self.batch_normalization(conv, phase_train, scope)
 
             # Relu
             if relu: conv = tf.nn.relu(conv, name=scope.name)
@@ -271,7 +252,8 @@ class SODMatrix():
             C = X.get_shape().as_list()[-1]
 
             # Xavier init
-            kernel = tf.get_variable('Weights', shape=[F, F, F, K, C], initializer=tf.contrib.layers.xavier_initializer())
+            kernel = tf.get_variable('Weights', shape=[F, F, F, K, C],
+                                     initializer=tf.contrib.layers.variance_scaling_initializer())
 
             # Define the output shape if not given
             if out_shape is None:
@@ -474,7 +456,7 @@ class SODMatrix():
 
             # Define the Kernel for conv2. Which is a normal conv layer
             kernel = tf.get_variable('Weights', shape=[F, F, C, K],
-                                     initializer=tf.contrib.layers.xavier_initializer())
+                                     initializer=tf.contrib.layers.variance_scaling_initializer())
 
             # Add this kernel to the weights collection for L2 reg
             tf.add_to_collection('weights', kernel)
@@ -486,14 +468,7 @@ class SODMatrix():
             residual = tf.add(conv2, X)
 
             # Apply the batch normalization. Updates weights during training phase only
-            if BN:
-                residual = tf.cond(phase_train,
-                               lambda: tf.contrib.layers.batch_norm(residual, activation_fn=None, center=True, scale=True,
-                                                            updates_collections=None, is_training=True, reuse=None,
-                                                            scope=scope, decay=0.9, epsilon=1e-5),
-                               lambda: tf.contrib.layers.batch_norm(residual, activation_fn=None, center=True, scale=True,
-                                                            updates_collections=None, is_training=False, reuse=True,
-                                                            scope=scope, decay=0.9, epsilon=1e-5))
+            if BN: residual = self.batch_normalization(residual, phase_train, scope)
 
             # Relu activation
             if relu: residual = tf.nn.relu(residual, name=scope.name)
@@ -554,18 +529,7 @@ class SODMatrix():
             residual = tf.add(conv, X)
 
             # Apply the batch normalization. Updates weights during training phase only
-            if BN:
-                residual = tf.cond(phase_train,
-                                   lambda: tf.contrib.layers.batch_norm(residual, activation_fn=None, center=True,
-                                                                        scale=True,
-                                                                        updates_collections=None, is_training=True,
-                                                                        reuse=None,
-                                                                        scope='BNRes', decay=0.9, epsilon=1e-5),
-                                   lambda: tf.contrib.layers.batch_norm(residual, activation_fn=None, center=True,
-                                                                        scale=True,
-                                                                        updates_collections=None, is_training=False,
-                                                                        reuse=True,
-                                                                        scope='BNRes', decay=0.9, epsilon=1e-5))
+            if BN: residual = self.batch_normalization(residual, phase_train, scope)
 
             # Relu activation
             if relu: residual = tf.nn.relu(residual, name=scope.name)
@@ -800,7 +764,7 @@ class SODMatrix():
 
             # Initialize the weights
             weights = tf.get_variable('weights', shape=[dim, neurons],
-                                      initializer=tf.truncated_normal_initializer(stddev=5e-2))
+                                      initializer=tf.contrib.layers.variance_scaling_initializer())
 
             # Add to the collection of weights
             tf.add_to_collection('weights', weights)
@@ -846,7 +810,7 @@ class SODMatrix():
 
             # Initialize the weights
             weights = tf.get_variable('weights', shape=[dim, neurons],
-                                      initializer=tf.truncated_normal_initializer(stddev=5e-2))
+                                      initializer=tf.contrib.layers.variance_scaling_initializer())
 
             # Add to the collection of weights
             tf.add_to_collection('weights', weights)
@@ -890,9 +854,9 @@ class SODMatrix():
 
             # Set up the localisation network to calculate floc(u):
             W1 = tf.get_variable('Weights1', shape=[dim * dim * 128, 20],
-                                 initializer=tf.truncated_normal_initializer(stddev=5e-2))
-            B1 = tf.get_variable('Bias1', shape=[20], initializer=tf.truncated_normal_initializer(stddev=5e-2))
-            W2 = tf.get_variable('Weights2', shape=[20, 6], initializer=tf.truncated_normal_initializer(stddev=5e-2))
+                                 initializer=tf.contrib.layers.variance_scaling_initializer())
+            B1 = tf.get_variable('Bias1', shape=[20], initializer=tf.contrib.layers.variance_scaling_initializer())
+            W2 = tf.get_variable('Weights2', shape=[20, 6], initializer=tf.contrib.layers.variance_scaling_initializer())
 
             # Add weights to collection
             tf.add_to_collection('weights', W1)
@@ -1113,6 +1077,7 @@ class SODMatrix():
     """
 
     def batch_normalization(self, conv, phase_train, scope):
+
         """
         Wrapper for the batch normalization implementation
         :param conv: The layer to normalize
@@ -1121,13 +1086,7 @@ class SODMatrix():
         :return: conv: the normalized convolution
         """
 
-        return tf.cond(phase_train,
-                       lambda: tf.contrib.layers.batch_norm(conv, activation_fn=None, center=True, scale=True,
-                                                    updates_collections=None, is_training=True, reuse=None,
-                                                    scope=scope, decay=0.9, epsilon=1e-5),
-                       lambda: tf.contrib.layers.batch_norm(conv, activation_fn=None, center=True, scale=True,
-                                                    updates_collections=None, is_training=False, reuse=True,
-                                                    scope=scope, decay=0.9, epsilon=1e-5))
+        return tf.layers.batch_normalization(conv, training=phase_train)
 
 
     def transformer(self, U, theta, out_size, name='SpatialTransformer', **kwargs):
