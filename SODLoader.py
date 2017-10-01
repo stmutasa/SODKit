@@ -881,7 +881,8 @@ class SODLoader():
         return np.subtract(image, img_min), angle, [sy, sx]
 
 
-    def calc_fast_affine(self, image, angle_range=[]):
+    def calc_fast_affine(self, image, center=[], angle_range=[]):
+
         """
         This function returns 3 matrices that define affine rotations in 3D
         :param image: 
@@ -892,22 +893,31 @@ class SODLoader():
         # The image is sent in Z,Y,X format
         Z, Y, X = image.shape
 
-        # Define the affine angles of rotation
-        anglex = random.randrange(-angle_range[0], angle_range[0])
-        angley = random.randrange(-angle_range[1], angle_range[1])
-        anglez = random.randrange(-angle_range[2], angle_range[2])
+        # OpenCV makes interpolated pixels equal 0. Add the minumum value to subtract it later
+        img_min = abs(image.min())
+        image = np.add(image, img_min)
 
-        # Matrix to rotate along saggital plane (Y columns, Z rows)
-        Mx = cv2.getRotationMatrix2D((Y / 2, Z / 2), anglex, 1)
-        My = cv2.getRotationMatrix2D((X / 2, Z / 2), angley, 1)
-        Mz = cv2.getRotationMatrix2D((Y / 2, X / 2), anglez, 1)
+        # Define the affine angles of rotation
+        anglex = random.randrange(-angle_range[2], angle_range[2])
+        angley = random.randrange(-angle_range[1], angle_range[1])
+        anglez = random.randrange(-angle_range[0], angle_range[0])
+
+        # Matrix to rotate along Coronal plane (Y columns, Z rows)
+        Mx = cv2.getRotationMatrix2D((center[1], center[0]), anglex, 1)
+
+        # Matrix to rotate along saggital plane (Z and X) and apply
+        My = cv2.getRotationMatrix2D((center[2], center[0]), angley, 1)
+
+        # Matrix to rotate along Axial plane (X and Y)
+        Mz = cv2.getRotationMatrix2D((center[1], center[2]), anglez, 1)
 
         return [Mx, My, Mz]
 
 
     def perform_fast_affine(self, image, M=[]):
+
         """
-        This function applies an affnie transform using the given affine matrices
+        This function applies an affine transform using the given affine matrices
         :param image: input volume
         :param M: Affine matrices along x, y and z
         :return: image
