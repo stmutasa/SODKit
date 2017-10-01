@@ -881,21 +881,13 @@ class SODLoader():
         return np.subtract(image, img_min), angle, [sy, sx]
 
 
-    def calc_fast_affine(self, image, center=[], angle_range=[]):
+    def calc_fast_affine(self, center=[], angle_range=[]):
 
         """
         This function returns 3 matrices that define affine rotations in 3D
-        :param image: 
         :param angle_range: matrix of range of rotation along z, y, x
         :return: array with the affine matrices
         """
-
-        # The image is sent in Z,Y,X format
-        Z, Y, X = image.shape
-
-        # OpenCV makes interpolated pixels equal 0. Add the minumum value to subtract it later
-        img_min = abs(image.min())
-        image = np.add(image, img_min)
 
         # Define the affine angles of rotation
         anglex = random.randrange(-angle_range[2], angle_range[2])
