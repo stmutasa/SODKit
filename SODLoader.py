@@ -886,7 +886,7 @@ class SODLoader():
         """
         This function returns 3 matrices that define affine rotations in 3D
         :param image: 
-        :param angle_range: matrix of range of rotation along x, y and z
+        :param angle_range: matrix of range of rotation along z, y, x
         :return: array with the affine matrices
         """
 
