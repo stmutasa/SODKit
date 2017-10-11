@@ -661,7 +661,9 @@ class SODMatrix():
             if relu: conv = tf.nn.relu(conv, name=scope.name)
 
             # Dropout here if wanted and in train phase
-            if phase_train and dropout: conv = tf.nn.dropout(conv, keep_prob)
+            if (phase_train == True) and dropout:
+                print('Dropping like its hot')
+                conv = tf.nn.dropout(conv, keep_prob)
 
             # Average outputs if we used an override
             if override:
@@ -724,7 +726,9 @@ class SODMatrix():
             if relu: conv = tf.nn.relu(conv, name=scope.name)
 
             # Dropout here if wanted and in train phase
-            if phase_train and dropout: conv = tf.nn.dropout(conv, keep_prob)
+            if (phase_train == True) and dropout:
+                print('Dropping like its hot')
+                conv = tf.nn.dropout(conv, keep_prob)
 
             # Average outputs if we used an override
             if override:
@@ -778,7 +782,9 @@ class SODMatrix():
             fc7 = tf.nn.relu(fc7 + biases, name=scope.name)
 
             # Dropout here if wanted and in train phase
-            if phase_train and dropout: fc7 = tf.nn.dropout(fc7, keep_prob)
+            if (phase_train == True) and dropout:
+                print('Dropping like its hot')
+                fc7 = tf.nn.dropout(fc7, keep_prob)
 
             # Activation summary
             if summary: self._activation_summary(fc7)
@@ -831,7 +837,9 @@ class SODMatrix():
             if relu: linear = tf.nn.relu(linear, name=scope.name)
 
             # Dropout here if wanted and in train phase
-            if phase_train and dropout: linear = tf.nn.dropout(linear, keep_prob)
+            if (phase_train == True) and dropout:
+                print ('Dropping like its hot')
+                linear = tf.nn.dropout(linear, keep_prob)
 
             # Activation summary
             if summary: self._activation_summary(linear)
