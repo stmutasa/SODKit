@@ -1605,7 +1605,12 @@ class SODLoader():
                 if z == 0: filename = (file_root + '_Test' + '.tfrecords')
                 else: filename = (file_root + '_Train' + '.tfrecords')
 
+            # For one file
+            elif xvals == 1: filename = (file_root + '.tfrecords')
+
             else: filename = (file_root + str(z) + '.tfrecords')
+
+
             writer.append(tf.python_io.TFRecordWriter(filename))
 
         # Loop through each example and append the protobuf with the specified features
