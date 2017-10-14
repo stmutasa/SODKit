@@ -200,7 +200,7 @@ class SODMatrix():
         with tf.variable_scope(scope) as scope:
 
             # Set channel size based on input depth
-            C = X.get_shape().as_list()[3]
+            C = X.get_shape().as_list()[-1]
 
             # Xavier init
             kernel = tf.get_variable('Weights', shape=[F, F, K, C],
