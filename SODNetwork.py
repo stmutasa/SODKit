@@ -106,15 +106,18 @@ class SODMatrix():
             # Set training phase variable
             self.training_phase = phase_train
 
-            # Define the Kernel. Can use Xavier init: contrib.layers.xavier_initializer())
-            kernel = tf.get_variable('Weights', shape=[F[0], F[1], F[2], C, K],
+            # Define the Kernel. Can use he et al
+            try: kernel = tf.get_variable('Weights', shape=[F[0], F[1], F[2], C, K],
+                                     initializer=tf.contrib.layers.variance_scaling_initializer())
+            except: kernel = tf.get_variable('Weights', shape=[F, F, F, C, K],
                                      initializer=tf.contrib.layers.variance_scaling_initializer())
 
             # Add to the weights collection
             tf.add_to_collection('weights', kernel)
 
             # Perform the actual convolution
-            conv = tf.nn.conv3d(X, kernel, [1, S, S, S, 1], padding=padding)  # Create a 2D tensor with BATCH_SIZE rows
+            try: conv = tf.nn.conv3d(X, kernel, [1, S[0], S[1], S[2], 1], padding=padding)
+            except: conv = tf.nn.conv3d(X, kernel, [1, S, S, S, 1], padding=padding)
 
             # Apply the batch normalization. Updates weights during training phase only
             if BN: conv = self.batch_normalization(conv, phase_train, scope)
