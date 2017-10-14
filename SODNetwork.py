@@ -107,7 +107,7 @@ class SODMatrix():
             self.training_phase = phase_train
 
             # Define the Kernel. Can use Xavier init: contrib.layers.xavier_initializer())
-            kernel = tf.get_variable('Weights', shape=[F, F, F, C, K],
+            kernel = tf.get_variable('Weights', shape=[F[0], F[1], F[2], C, K],
                                      initializer=tf.contrib.layers.variance_scaling_initializer())
 
             # Add to the weights collection
@@ -174,7 +174,7 @@ class SODMatrix():
                 return conv
 
 
-    def deconvolution(self, scope, X, F, K, S, padding='SAME', phase_train=None,
+    def deconvolution(self, scope, X, F, K, S, padding='SAME', phase_train=None, concat=True,
                       concat_var=None, out_shape=None, summary=True, BN=True, relu=True):
         """
         This is a wrapper for De-convolutions aka fractionally strided convolutions aka transposed convolutions
@@ -186,6 +186,7 @@ class SODMatrix():
         :param S: Stride size
         :param padding: 'SAME' for padding, 'VALID' for no padding
         :param phase_train: Whether we are in training or testing mode
+        :param concat: Whether to concatenate or add
         :param concat_var: The variable aka "skip connection" to concatenate
         :param summary: whether to produce a tensorboard summary of this layer
         :param BN: whether to perform batch normalization
@@ -212,8 +213,9 @@ class SODMatrix():
             # Perform the deconvolution. output_shape: A 1-D Tensor representing the output shape of the deconvolution op.
             dconv = tf.nn.conv2d_transpose(X, kernel, output_shape=out_shape, strides=[1, S, S, 1], padding=padding)
 
-            # Concatenate along the depth axis
-            conv = tf.concat([concat_var, dconv], axis=3)
+            # Concatenate or add along the depth axis
+            if concat: conv = tf.concat([concat_var, dconv], axis=-1)
+            else: conv = tf.add(dconv, concat_var)
 
             # Apply the batch normalization. Updates weights during training phase only
             if BN: conv = self.batch_normalization(conv, phase_train, scope)
@@ -227,7 +229,7 @@ class SODMatrix():
             return conv
 
 
-    def deconvolution_3d(self, scope, X, F, K, S, padding='SAME', phase_train=None,
+    def deconvolution_3d(self, scope, X, F, K, S, padding='SAME', phase_train=None, concat=True,
                       concat_var=None, out_shape=None, summary=True, BN=True, relu=True):
         """
         This is a wrapper for 3D De-convolutions aka fractionally strided convolutions aka transposed convolutions
@@ -239,6 +241,7 @@ class SODMatrix():
         :param S: Stride size
         :param padding: 'SAME' for padding, 'VALID' for no padding
         :param phase_train: Whether we are in training or testing mode
+        :param concat: whether to concatenate skip connection or use a residual connection
         :param concat_var: The variable aka "skip connection" to concatenate
         :param summary: whether to produce a tensorboard summary of this layer
         :param BN: whether to perform batch normalization
@@ -266,8 +269,9 @@ class SODMatrix():
             # Perform the deconvolution. output_shape: A 1-D Tensor representing the output shape of the deconvolution op.
             dconv = tf.nn.conv3d_transpose(X, kernel, output_shape=out_shape, strides=[1, S, S, S, 1], padding=padding)
 
-            # Concatenate along the depth axis
-            conv = tf.concat([concat_var, dconv], axis=-1)
+            # Concatenate or add along the depth axis
+            if concat: conv = tf.concat([concat_var, dconv], axis=-1)
+            else: conv = tf.add(dconv, concat_var)
 
             # Apply the batch normalization. Updates weights during training phase only
             if BN: conv = self.batch_normalization(conv, phase_train, scope)
@@ -1070,6 +1074,29 @@ class SODMatrix():
         tf.add_to_collection('losses', loss)
 
         return loss
+
+
+    def calc_L2_Loss(self, L2_gamma, summary=True):
+        """
+        Calculates the L2 Loss
+        :param L2_gamma:
+        :param summary: Whether to create a tensorboard summary
+        :return:
+        """
+
+        # Retreive the weights collection
+        weights = tf.get_collection('weights')
+
+        # Sum the losses
+        L2_loss = tf.multiply(tf.add_n([tf.nn.l2_loss(v) for v in weights]), L2_gamma)
+
+        # Add it to the collection
+        tf.add_to_collection('losses', L2_loss)
+
+        # Activation summary
+        if summary: tf.summary.scalar('L2_Loss', L2_loss)
+
+        return L2_loss
 
 
     """
