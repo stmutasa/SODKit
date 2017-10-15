@@ -405,6 +405,80 @@ class SODTester():
         return softmax
 
 
+    def calc_metrics_segmentation(self, logitz, label_in, pt, slice, images=None, step=1, dice_threshold=0.5, batch_size=32):
+
+        # Convert to numpy arrays
+        logitz = np.squeeze(logitz.astype(np.float))
+        images = np.squeeze(images.astype(np.float))
+        labelz = np.squeeze(label_in.astype(np.float))
+        slice = np.asarray(slice)
+        pt = np.asarray(pt)
+        dice_score = 0
+
+        for i in range(0, batch_size):
+
+            # Retreive one image, label and prediction from the batch to save
+            prediction = logitz[i, :, :, 1]
+
+            # Manipulations to improve display data
+            pred1 = 1 - prediction  # Invert the softmax
+
+            # First create copies
+            p1 = np.copy(pred1)  # make an independent copy of logits map
+            p2 = np.copy(labelz[i])  # make an independent copy of labels map
+
+            # Now create boolean masks
+            p1[p1 > dice_threshold] = True  # Set predictions above threshold value to True
+            p1[p1 <= dice_threshold] = False  # Set those below to False
+            p2[p2 == 0] = False  # Mark lung and background as False
+            p2[p2 > 0] = True  # Mark nodules as True
+
+            # calculate DICE score
+            dice_score = self.calc_DICE(p1, p2, 1.0)
+
+            if np.sum(p2) > 10:
+                print('Sums: ', np.sum(p1), np.sum(p2))
+                self.display_single_image(p1, False, 'Inverse_Predictions')
+                self.display_single_image(p2, False, 'Label')
+                self.display_single_image(prediction, False, 'Raw_Prediction')
+                self.display_single_image(images[0, 2, :, :], True, 'Input')
+
+        # garbage
+        del logitz, images, labelz, slice, pt, prediction, pred1, p1, p2
+
+        # Return the DICE score
+        return dice_score/batch_size
+
+
+    def calc_DICE(self, im1, im2, empty_score=1.0):
+        """
+        Computes the DICE coefficient
+        :param im1: binary array
+        :param im2: binary array
+        :param empty_score:
+        :return: DICE score float bet 0-1. If both are empty then score is 1.0
+        Notes
+        -----
+        The order of inputs for `dice` is irrelevant. The result will be
+        identical if `im1` and `im2` are switched.
+        """
+
+        im1 = np.asarray(im1).astype(np.bool)
+        im2 = np.asarray(im2).astype(np.bool)
+
+        if im1.shape != im2.shape:
+            raise ValueError("Shape mismatch: im1 and im2 must have the same shape.")
+
+        im_sum = im1.sum() + im2.sum()
+        if im_sum == 0:
+            return empty_score
+
+        # Compute Dice coefficient
+        intersection = np.logical_and(im1, im2)
+
+        return 2. * intersection.sum() / im_sum
+
+
     def combine_predictions(self, ground_truth, predictions, unique_ID, batch_size):
         """
         Combines multi parametric predictions into one group
@@ -711,3 +785,58 @@ class SODTester():
         # print
         # sk.metrics.confusion_matrix(y_true, y_pred)
         # fpr, tpr, tresholds = sk.metrics.roc_curve(y_true, y_pred)
+
+
+    def display_overlay(self, img, mask):
+        """
+        Method to superimpose masks on 2D image
+        :params
+        (np.array) img : 2D image of format H x W or H x W x C
+          if C is empty (grayscale), image will be converted to 3-channel grayscale
+          if C == 1 (grayscale), image will be squeezed then converted to 3-channel grayscale
+          if C == 3 (rgb), image will not be converted
+        (np.array) mask : 2D mask(s) of format H x W or N x H x W
+        """
+
+        # Adjust shapes of img and mask
+        if len(img.shape) == 3 and img.shape[-1] == 1:
+            img = np.squeeze(img)
+        if len(img.shape) == 2:
+            img = self.gray2rgb(img)
+        if len(mask.shape) == 2:
+            mask = np.expand_dims(mask, 0)
+        mask = mask.astype('bool')
+
+        # Overlay mask(s)
+        if np.shape(img)[2] == 3:
+            rgb = [[1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 1, 1], [1, 0, 1], [1, 1, 0]]
+            overlay = []
+            for channel in range(3):
+                layer = img[:,:,channel]
+                for i in range(mask.shape[0]):
+                    layer[mask[i, :,:]] = rgb[i % 6][channel]
+                layer = np.expand_dims(layer, 2)
+                overlay.append(layer)
+            return np.concatenate(tuple(overlay), axis=2)
+
+
+    def display_single_image(self, nda, plot=True, title=None, cmap='gray', margin=0.05):
+        """ Helper function to display a numpy array using matplotlib
+        Args:
+            nda: The source image as a numpy array
+            title: what to title the picture drawn
+            margin: how wide a margin to use
+            plot: plot or not
+        Returns:
+            none"""
+
+        # Set up the figure object
+        fig = plt.figure()
+        ax = fig.add_axes([margin, margin, 1 - 2 * margin, 1 - 2 * margin])
+
+        # The rest is standard matplotlib fare
+        plt.set_cmap(cmap)  # Print in greyscale
+        ax.imshow(nda)
+
+        if title: plt.title(title)
+        if plot: plt.show()
