@@ -1583,7 +1583,7 @@ class SODLoader():
         return data
 
 
-    def save_tfrecords(self, data, xvals, test_size, file_root='data/Data'):
+    def save_tfrecords(self, data, xvals, test_size=50, file_root='data/Data'):
 
         """
         Saves the dictionary given to a protocol buffer in tfrecords format
@@ -1593,6 +1593,25 @@ class SODLoader():
         :param file_root: The first part of the filename to save. This includes the directory
         :return: not a damn thing
         """
+
+        # If only one file, just go head and save
+        if xvals ==1:
+
+            # Open the file writer
+            writer = tf.python_io.TFRecordWriter((file_root + '.tfrecords'))
+
+            # Loop through each example and append the protobuf with the specified features
+            for key, values in data.items():
+                # Serialize to string
+                example = tf.train.Example(features=tf.train.Features(feature=self.create_feature_dict(values, key)))
+
+                # Save this index as a serialized string in the protobuf
+                writer.write(example.SerializeToString())
+
+            # Close the file after writing
+            writer.close()
+
+            return
 
         # generate x number of writers depending on the cross validations
         writer = []

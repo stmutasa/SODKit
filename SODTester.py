@@ -436,12 +436,12 @@ class SODTester():
             # calculate DICE score
             dice_score = self.calc_DICE(p1, p2, 1.0)
 
-            if np.sum(p2) > 10:
-                print('Sums: ', np.sum(p1), np.sum(p2))
-                self.display_single_image(p1, False, 'Inverse_Predictions')
-                self.display_single_image(p2, False, 'Label')
-                self.display_single_image(prediction, False, 'Raw_Prediction')
-                self.display_single_image(images[0, 2, :, :], True, 'Input')
+            # if np.sum(p2) > 10:
+            #     print('Sums: ', np.sum(p1), np.sum(p2))
+            #     self.display_single_image(p1, False, 'Inverse_Predictions')
+            #     self.display_single_image(p2, False, 'Label')
+            #     self.display_single_image(prediction, False, 'Raw_Prediction')
+            #     self.display_single_image(images[0, 2, :, :], True, 'Input')
 
         # garbage
         del logitz, images, labelz, slice, pt, prediction, pred1, p1, p2
