@@ -405,7 +405,7 @@ class SODTester():
         return softmax
 
 
-    def calc_metrics_segmentation(self, logitz, label_in, pt, slice, images=None, step=1, dice_threshold=0.5, batch_size=32):
+    def calc_metrics_segmentation_no_mask(self, logitz, label_in, pt, slice, images=None, dice_threshold=0.5, batch_size=32):
 
         # Convert to numpy arrays
         logitz = np.squeeze(logitz.astype(np.float))
@@ -448,6 +448,57 @@ class SODTester():
 
         # Return the DICE score
         return dice_score/batch_size
+
+
+    def calc_metrics_segmentation(self, logitz, label_in, pt, slice, images=None, dice_threshold=0.5, batch_size=32):
+
+        # Convert to numpy arrays
+        logitz = np.squeeze(logitz.astype(np.float))
+        images = np.squeeze(images.astype(np.float))
+        labelz = np.squeeze(label_in.astype(np.float))
+        slice = np.asarray(slice)
+        pt = np.asarray(pt)
+        dice_score = 0
+
+        for i in range(0, batch_size):
+
+            # Retreive one image, label and prediction from the batch to save
+            prediction = logitz[i, :, :, 1]
+
+            # Manipulations to improve display data
+            lbl2 = np.copy(labelz[i])  # Copy since we will print below
+            pred1 = 1 - prediction  # Invert the softmax
+            lbl2[lbl2 > 0] = 1  # For removing background noise in the image
+
+            # Zero out the background on the predicted map
+            pred2 = np.multiply(np.squeeze(pred1), np.squeeze(lbl2))
+
+            # First create copies
+            p1 = np.copy(pred2)  # make an independent copy of logits map
+            p2 = np.copy(labelz[i])  # make an independent copy of labels map
+
+            # Now create boolean masks
+            p1[p1 > dice_threshold] = True  # Set predictions above threshold value to True
+            p1[p1 <= dice_threshold] = False  # Set those below to False
+            p2[p2 <= 1] = False  # Mark lung and background as False
+            p2[p2 > 1] = True  # Mark nodules as True
+
+            # calculate DICE score
+            dice_score = self.calc_DICE(p1, p2, 1.0)
+
+            if np.sum(p2) > 5:
+                print('Sums: ', np.sum(p1), np.sum(p2))
+                self.display_single_image(p1, False, 'Predictions')
+                self.display_single_image(p2, False, 'Label')
+                self.display_mosaic(images[0], plot=False, title='Input Slices', size=[40, 40], cbar=False, cmap='gray')
+
+        plt.show()
+
+        # garbage
+        del logitz, images, labelz, slice, pt, prediction, pred1, p1, p2
+
+        # Return the DICE score
+        return dice_score / batch_size
 
 
     def calc_DICE(self, im1, im2, empty_score=1.0):
