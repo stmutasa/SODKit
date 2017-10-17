@@ -492,6 +492,7 @@ class SODTester():
                 self.display_single_image(p2, False, 'Label')
                 self.display_mosaic(images[0], plot=False, title='Input Slices', size=[40, 40], cbar=False, cmap='gray')
 
+        # Test
         plt.show()
 
         # garbage
