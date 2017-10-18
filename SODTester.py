@@ -405,14 +405,12 @@ class SODTester():
         return softmax
 
 
-    def calc_metrics_segmentation_no_mask(self, logitz, label_in, pt, slice, images=None, dice_threshold=0.5, batch_size=32):
+    def calc_metrics_segmentation_no_mask(self, logitz, label_in, display=False, images=None, dice_threshold=0.5, batch_size=32):
 
         # Convert to numpy arrays
         logitz = np.squeeze(logitz.astype(np.float))
         images = np.squeeze(images.astype(np.float))
         labelz = np.squeeze(label_in.astype(np.float))
-        slice = np.asarray(slice)
-        pt = np.asarray(pt)
         dice_score = 0
 
         for i in range(0, batch_size):
@@ -436,29 +434,28 @@ class SODTester():
             # calculate DICE score
             dice_score = self.calc_DICE(p1, p2, 1.0)
 
-            # if np.sum(p2) > 10:
-            #     print('Sums: ', np.sum(p1), np.sum(p2))
-            #     self.display_single_image(p1, False, 'Inverse_Predictions')
-            #     self.display_single_image(p2, False, 'Label')
-            #     self.display_single_image(prediction, False, 'Raw_Prediction')
-            #     self.display_single_image(images[0, 2, :, :], True, 'Input')
+            if display:
+                self.display_single_image(p1, False, 'Predictions')
+                self.display_single_image(p2, False, 'Label')
+                self.display_mosaic(images[0], plot=False, title='Input Slices', size=[40, 40], cbar=False, cmap='gray')
+
+        # Test
+        if display: plt.show()
 
         # garbage
-        del logitz, images, labelz, slice, pt, prediction, pred1, p1, p2
+        del logitz, images, labelz, prediction, pred1, p1, p2
 
         # Return the DICE score
         return dice_score/batch_size
 
 
-    def calc_metrics_segmentation(self, logitz, label_in, pt, slice, images=None, dice_threshold=0.5, batch_size=32):
+    def calc_metrics_segmentation(self, logitz, label_in, images=None, dice_threshold=0.5, batch_size=32, display=False):
 
         # Convert to numpy arrays
         logitz = np.squeeze(logitz.astype(np.float))
-        images = np.squeeze(images.astype(np.float))
         labelz = np.squeeze(label_in.astype(np.float))
-        slice = np.asarray(slice)
-        pt = np.asarray(pt)
-        dice_score = 0
+        images = np.squeeze(images.astype(np.float))
+        total, dice_score = 0, 0
 
         for i in range(0, batch_size):
 
@@ -483,23 +480,27 @@ class SODTester():
             p2[p2 <= 1] = False  # Mark lung and background as False
             p2[p2 > 1] = True  # Mark nodules as True
 
-            # calculate DICE score
-            dice_score = self.calc_DICE(p1, p2, 1.0)
+            # Calculate DICE score
+            dice = self.calc_DICE(p1, p2, None)
 
-            if np.sum(p2) > 5:
-                print('Sums: ', np.sum(p1), np.sum(p2))
+            if dice:
+                dice_score +=dice
+                total += 1
+
+            if display:
                 self.display_single_image(p1, False, 'Predictions')
                 self.display_single_image(p2, False, 'Label')
                 self.display_mosaic(images[0], plot=False, title='Input Slices', size=[40, 40], cbar=False, cmap='gray')
 
         # Test
-        plt.show()
+        if display: plt.show()
 
         # garbage
-        del logitz, images, labelz, slice, pt, prediction, pred1, p1, p2
+        del logitz, labelz, images, prediction, pred1, p1, p2
 
         # Return the DICE score
-        return dice_score / batch_size
+        try: return dice_score / total
+        except: return None
 
 
     def calc_DICE(self, im1, im2, empty_score=1.0):
@@ -892,3 +893,99 @@ class SODTester():
 
         if title: plt.title(title)
         if plot: plt.show()
+
+
+    def display_mosaic(self, vol, plot=False, fig=None, title=None, size=[10, 10], vmin=None, vmax=None,
+               return_mosaic=False, cbar=True, return_cbar=False, **kwargs):
+        """
+        Display a 3-d volume of data as a 2-d mosaic
+        :param vol: The 3D numpy array of the data
+        :param fig: matplotlib figure, optional If this should appear in an already existing figure instance
+        :param title: str, the title
+        :param size: the height of each slice
+        :param vmin: upper and lower clip-limits on the color-map
+        :param vmax:
+        :param return_mosaic:
+        :param cbar:
+        :param return_cbar:
+        :param kwargs: **kwargs: additional arguments to matplotlib.pyplot.matshow
+        :return: fig: the figure handle
+        """
+
+        if vmin is None:
+            vmin = np.nanmin(vol)
+        if vmax is None:
+            vmax = np.nanmax(vol)
+
+        sq = int(np.ceil(np.sqrt(len(vol))))
+
+        # Take the first one, so that you can assess what shape the rest should be:
+        im = np.hstack(vol[0:sq])
+        height = im.shape[0]
+        width = im.shape[1]
+
+        # If this is a 4D thing and it has 3 as the last dimension
+        if len(im.shape) > 2:
+            if im.shape[2] == 3 or im.shape[2] == 4:
+                mode = 'rgb'
+            else:
+                e_s = "This array has too many dimensions for this"
+                raise ValueError(e_s)
+        else:
+            mode = 'standard'
+
+        for i in range(1, sq):
+            this_im = np.hstack(vol[int(len(vol) / sq) * i:int(len(vol) / sq) * (i + 1)])
+            wid_margin = width - this_im.shape[1]
+            if wid_margin:
+                if mode == 'standard':
+                    this_im = np.hstack([this_im,
+                                         np.nan * np.ones((height, wid_margin))])
+                else:
+                    this_im = np.hstack([this_im,
+                                         np.nan * np.ones((im.shape[2],
+                                                           height,
+                                                           wid_margin))])
+            im = np.concatenate([im, this_im], 0)
+
+        if fig is None:
+            fig = plt.figure()
+            ax = fig.add_subplot(111, aspect='equal')
+        else:
+            # This assumes that the figure was originally created with this
+            # function:
+            ax = fig.axes[0]
+
+        if mode == 'standard':
+            imax = ax.matshow(im.T, vmin=vmin, vmax=vmax, **kwargs)
+        else:
+            imax = plt.imshow(np.rot90(im), interpolation='nearest')
+            cbar = False
+        ax.get_axes().get_xaxis().set_visible(False)
+        ax.get_axes().get_yaxis().set_visible(False)
+        returns = [fig]
+        if cbar:
+            # The colorbar will refer to the last thing plotted in this figure
+            cbar = fig.colorbar(imax, ticks=[np.nanmin([0, vmin]),
+                                             vmax - (vmax - vmin) / 2,
+                                             np.nanmin([vmax, np.nanmax(im)])],
+                                format='%1.2f')
+            if return_cbar:
+                returns.append(cbar)
+
+        if title is not None:
+            ax.set_title(title)
+        if size is not None:
+            fig.set_size_inches(size)
+
+        if return_mosaic:
+            returns.append(im)
+
+        # If you are just returning the fig handle, unpack it:
+        if len(returns) == 1:
+            returns = returns[0]
+
+        # If we are displaying:
+        if plot: plt.show()
+
+        return returns

@@ -986,29 +986,37 @@ class SODLoader():
         :return: cube: the cube itself
         """
 
+        # Sometimes size is an array
+        if isinstance(size, int):
+            sizey = size
+            sizex = size
+        else:
+            sizey = int(size[0])
+            sizex = int(size[1])
+
         # First implement the 2D version
         if not dim3d:
 
             # Make the starting point = center-size unless near the edge then make it 0
-            startx = max(origin[1] - size / 2, 0)
-            starty = max(origin[0] - size / 2, 0)
+            startx = max(origin[1] - sizex / 2, 0)
+            starty = max(origin[0] - sizey / 2, 0)
 
             # If near the far edge, make it fit inside the image
-            if (startx + size) > image.shape[1]:
-                startx = image.shape[1] - size
-            if (starty + size) > image.shape[0]:
-                starty = image.shape[0] - size
+            if (startx + sizex) > image.shape[1]:
+                startx = image.shape[1] - sizex
+            if (starty + sizey) > image.shape[0]:
+                starty = image.shape[0] - sizey
 
             # Convert to integers
             startx = int(startx)
             starty = int(starty)
 
             # Now retreive the box
-            box = image[starty:starty + size, startx:startx + size]
+            box = image[starty:starty + sizey, startx:startx + sizex]
 
             # If boxes had to be shifted, we have to calculate a new 'center' of the nodule in the box
-            new_center = [int(size / 2 - ((starty + size / 2) - origin[1])),
-                          int(size / 2 - ((startx + size / 2) - origin[1]))]
+            new_center = [int(sizey / 2 - ((starty + sizey / 2) - origin[0])),
+                          int(sizex / 2 - ((startx + sizex / 2) - origin[1]))]
 
             return box, new_center
 
