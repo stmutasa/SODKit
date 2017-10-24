@@ -310,17 +310,17 @@ class SODMatrix():
                                           phase_train=phase_train, summary=summary, BN=BN, relu=relu)  # 64x64x64
 
             # Second branch, 1x1 convolution then 3x3 convolution
-            inception2a = self.convolution('Inception2a', X, 1, 1, 1,
+            inception2a = self.convolution('Inception2a', X, 1, K, S,
                                            phase_train=phase_train, summary=summary)  # 64x64x1
 
-            inception2 = self.convolution('Inception2', inception2a, 3, K, S,
+            inception2 = self.convolution('Inception2', inception2a, 3, K, 1,
                                           phase_train=phase_train, summary=summary, BN=BN, relu=relu)  # 64x64x64
 
             # Third branch, 1x1 convolution then 5x5 convolution:
-            inception3a = self.convolution('Inception3a', X, 1, 1, 1,
+            inception3a = self.convolution('Inception3a', X, 1, K, S,
                                            phase_train=phase_train, summary=summary)  # 64x64x1
 
-            inception3 = self.convolution('Inception3', inception3a, 5, K, S,
+            inception3 = self.convolution('Inception3', inception3a, 5, K, 1,
                                           phase_train=phase_train, summary=summary, BN=BN, relu=relu)  # 64x64x64
 
             # Fourth branch, max pool then 1x1 conv:
@@ -357,17 +357,17 @@ class SODMatrix():
                                           phase_train=phase_train, summary=summary, BN=BN, relu=relu)  # 64x64x64
 
             # Second branch, 1x1 convolution then 3x3 convolution
-            inception2a = self.convolution_3d('Inception2a', X, 1, 1, 1,
+            inception2a = self.convolution_3d('Inception2a', X, 1, K, S,
                                            phase_train=phase_train, summary=summary)  # 64x64x1
 
-            inception2 = self.convolution_3d('Inception2', inception2a, 3, K, S,
+            inception2 = self.convolution_3d('Inception2', inception2a, 3, K, 1,
                                           phase_train=phase_train, summary=summary, BN=BN, relu=relu)  # 64x64x64
 
             # Third branch, 1x1 convolution then 5x5 convolution:
-            inception3a = self.convolution_3d('Inception3a', X, 1, 1, 1,
+            inception3a = self.convolution_3d('Inception3a', X, 1, K, S,
                                            phase_train=phase_train, summary=summary)  # 64x64x1
 
-            inception3 = self.convolution_3d('Inception3', inception3a, 5, K, S,
+            inception3 = self.convolution_3d('Inception3', inception3a, 5, K, 1,
                                           phase_train=phase_train, summary=summary, BN=BN, relu=relu)  # 64x64x64
 
             # Fourth branch, max pool then 1x1 conv:
