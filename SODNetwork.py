@@ -214,11 +214,13 @@ class SODMatrix():
                 out_shape[3] = K
 
             # Perform the deconvolution. output_shape: A 1-D Tensor representing the output shape of the deconvolution op.
-            dconv = tf.nn.conv2d_transpose(X, kernel, output_shape=out_shape, strides=[1, S, S, 1], padding=padding)
+            conv = tf.nn.conv2d_transpose(X, kernel, output_shape=out_shape, strides=[1, S, S, 1], padding=padding)
 
-            # Concatenate or add along the depth axis
-            if concat: conv = tf.concat([concat_var, dconv], axis=-1)
-            else: conv = tf.add(dconv, concat_var)
+            if concat_var:
+
+                # Concatenate or add along the depth axis
+                if concat: conv = tf.concat([concat_var, conv], axis=-1)
+                else: conv = tf.add(conv, concat_var)
 
             # Apply the batch normalization. Updates weights during training phase only
             if BN: conv = self.batch_normalization(conv, phase_train, scope)
