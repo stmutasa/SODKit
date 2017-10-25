@@ -216,7 +216,7 @@ class SODMatrix():
             # Perform the deconvolution. output_shape: A 1-D Tensor representing the output shape of the deconvolution op.
             conv = tf.nn.conv2d_transpose(X, kernel, output_shape=out_shape, strides=[1, S, S, 1], padding=padding)
 
-            if concat_var:
+            if concat_var is not None:
 
                 # Concatenate or add along the depth axis
                 if concat: conv = tf.concat([concat_var, conv], axis=-1)
