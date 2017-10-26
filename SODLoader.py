@@ -155,9 +155,6 @@ class SODLoader():
         # retreive spacing
         spacing = np.asarray(image_all.GetSpacing())
 
-        # reverse image index
-        image = np.swapaxes(image, -1, 0)
-
         return image.astype(dtype), origin, spacing, image.shape
 
 
