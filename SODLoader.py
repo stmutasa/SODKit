@@ -135,6 +135,32 @@ class SODLoader():
         return image, numpyOrigin, numpySpacing, dims
 
 
+    def load_nrrd_3D(self, path, dtype=np.int16):
+        """
+        Load a 3D nrrd file with header info
+        :param path:
+        :param dtype:
+        :return: image, origin, spacing
+        """
+
+        # Load the file
+        image_all = sitk.ReadImage(path)
+
+        # get the image data
+        image = np.squeeze(sitk.GetArrayFromImage(image_all))
+
+        # Retreive the origin
+        origin = np.asarray(image_all.GetOrigin())
+
+        # retreive spacing
+        spacing = np.asarray(image_all.GetSpacing())
+
+        # reverse image index
+        image = np.swapaxes(image, -1, 0)
+
+        return image.astype(dtype), origin, spacing, image.shape
+
+
     def load_MAT(self, path):
         """
         Loads a matlab .mat file
