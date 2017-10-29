@@ -443,58 +443,6 @@ class SODMatrix():
         return inception
 
 
-    def res_inc_layer(self, scope, X, F, K, padding='SAME', phase_train=None, summary=True, BN=True, relu=True):
-        """
-        This is a wrapper for implementing a hybrid residual layer with inception layer as F(x)
-        :param scope:
-        :param X: Output of the previous layer
-        :param F: Dimensions of the second convolution in F(x) - the non inception layer one
-        :param K: Feature maps in the inception layer (will be multiplied by 4 during concatenation)
-        :param S: Stride
-        :param padding:
-        :param phase_train: For batch norm implementation
-        :param summary: whether to produce a tensorboard summary of this layer
-        :param BN: whether to perform batch normalization
-        :return:
-        """
-
-        # Set channel size based on input depth
-        C = X.get_shape().as_list()[-1]
-
-        # Set the scope. Implement a residual layer below: Conv-relu-conv-residual-relu
-        with tf.variable_scope(scope) as scope:
-
-            # The first layer is an inception layer
-            conv1 = self.inception_layer(scope, X, K, 1, phase_train=phase_train)
-
-            # Set channel size based on input depth
-            #C = conv1.get_shape().as_list()[3]
-
-            # Define the Kernel for conv2. Which is a normal conv layer
-            kernel = tf.get_variable('Weights', shape=[F, F, C, K],
-                                     initializer=tf.contrib.layers.variance_scaling_initializer())
-
-            # Add this kernel to the weights collection for L2 reg
-            tf.add_to_collection('weights', kernel)
-
-            # Perform the actual convolution
-            conv2 = tf.nn.conv2d(conv1, kernel, [1, 1, 1, 1], padding=padding)
-
-            # Add in the residual here
-            residual = tf.add(conv2, X)
-
-            # Apply the batch normalization. Updates weights during training phase only
-            if BN: residual = self.batch_normalization(residual, phase_train, scope)
-
-            # Relu activation
-            if relu: residual = tf.nn.relu(residual, name=scope.name)
-
-            # Create a histogram/scalar summary of the conv1 layer
-            if summary: self._activation_summary(residual)
-
-            return residual
-
-
     def residual_layer(self, scope, X, F, K, S=2, K_prob=None, padding='SAME',
                        phase_train=None, summary=True, DSC=False, BN=False, relu=False):
         """
@@ -596,6 +544,123 @@ class SODMatrix():
 
             # Downsample the residual input if we did the conv layer. pool or strided
             if DSC: X = self.incepted_downsample_3d(X)
+            elif S>1: X = self.convolution_3d('ResDown', X, 2, K*S, S, phase_train=phase_train, BN=False, relu=False)
+
+            # The Residual block
+            residual = tf.add(conv, X)
+
+            # Apply the batch normalization. Updates weights during training phase only
+            if BN: residual = self.batch_normalization(residual, phase_train, 'BNRes')
+
+            # Relu activation
+            if relu: residual = tf.nn.relu(residual, name=scope.name)
+
+            return residual
+
+
+    def res_inc_layer(self, scope, X, K, S=2, K_prob=None, padding='SAME',
+                       phase_train=None, summary=True, DSC=False, BN=False, relu=False):
+        """
+        This is a wrapper for implementing a residual layer with incepted connections
+        :param scope:
+        :param X: Output of the previous layer, make sure this is not normalized and has no nonlinearity applied
+        :param K: Feature maps in the inception layer (will be multiplied by 4 during concatenation)
+        :param S: Stride of the convolution, whether to downsample
+        :param k_prob: keep probability for dropout
+        :param padding: SAME or VALID
+        :param phase_train: For batch norm implementation
+        :param summary: whether to produce a tensorboard summary of this layer
+        :param DSC: Whether to perform standard downsample or incepted downsample
+        :param BN: Whether to batch norm. Defaults to false to plug into another residual
+        :param relu: whether to apply a nonlinearity at the end.
+        :return:
+        """
+
+        # Set the scope. Implement a residual layer below
+        with tf.variable_scope(scope) as scope:
+
+            # Input is linear. Batch norm it then run it through a nonlinearity
+            conv1 = self.batch_normalization(X, phase_train, scope)
+
+            # ReLU
+            conv1 = tf.nn.relu(conv1, scope.name)
+
+            # Dropout
+            if K_prob: conv1 = tf.nn.dropout(conv1, K_prob)
+
+            # Another Convolution with BN and ReLu
+            conv2 = self.inception_layer('Conv2', conv1, K, 1, padding, phase_train, summary, True, True)
+
+            # Second dropout
+            if K_prob: conv2 = tf.nn.dropout(conv2, K_prob)
+
+            # Final downsampled conv without BN or RELU
+            if DSC:
+                conv = self.inception_layer('ConvFinal', conv2, K, 1, padding, phase_train, summary, False, False)
+                conv = self.incepted_downsample(conv, summary=summary)
+            else: conv = self.inception_layer('ConvFinal', conv2, K*S, S, padding, phase_train, summary, False, False)
+
+            # Downsample the residual input if we did the conv layer. pool or strided
+            if DSC: X = self.incepted_downsample(X, summary=summary)
+            elif S>1: X = self.convolution('ResDown', X, 2, K*S, S, phase_train=phase_train, BN=False, relu=False)
+
+            # The Residual block
+            residual = tf.add(conv, X)
+
+            # Apply the batch normalization. Updates weights during training phase only
+            if BN: residual = self.batch_normalization(residual, phase_train, scope)
+
+            # Relu activation
+            if relu: residual = tf.nn.relu(residual, name=scope.name)
+
+            return residual
+
+
+    def res_inc_layer_3d(self, scope, X, Fz, K, S=2, K_prob=None, padding='SAME',
+                       phase_train=None, summary=True, DSC=False, BN=False, relu=False):
+        """
+        This is a wrapper for implementing a residual layer with incepted layers between
+        :param scope:
+        :param X: Output of the previous layer, make sure this is not normalized and has no nonlinearity applied
+        :param Fz: The z dimension of the inception filter
+        :param K: Feature maps in the inception layer (will be multiplied by 4 during concatenation)
+        :param S: Stride of the convolution, whether to downsample
+        :param k_prob: keep probability for dropout
+        :param padding: SAME or VALID
+        :param phase_train: For batch norm implementation
+        :param summary: whether to produce a tensorboard summary of this layer
+        :param DSC: Whether to perform standard downsample or incepted downsample
+        :param BN: Whether to batch norm. Defaults to false to plug into another residual
+        :param relu: whether to apply a nonlinearity at the end.
+        :return:
+        """
+
+        # Set the scope. Implement a residual layer below
+        with tf.variable_scope(scope) as scope:
+
+            # Start the second conv layer: BN->Relu->Drop->Conv->BN->Relu->dropout
+            conv1 = self.batch_normalization(X, phase_train, scope)
+
+            # ReLU
+            conv1 = tf.nn.relu(conv1, scope.name)
+
+            # Dropout
+            if K_prob: conv1 = tf.nn.dropout(conv1, K_prob)
+
+            # Another Convolution with BN and ReLu
+            conv2 = self.inception_layer_3d('Inc1', conv1, K, Fz, 1, padding, phase_train, summary, True, True)
+
+            # Second dropout
+            if K_prob: conv2 = tf.nn.dropout(conv2, K_prob)
+
+            # Final downsampled conv without BN or RELU
+            if DSC:
+                conv = self.inception_layer_3d('IncFinal', conv2, K, Fz, 1, padding, phase_train, summary, False, False)
+                conv = self.incepted_downsample_3d(conv, summary=summary)
+            else: conv = self.inception_layer_3d('IncFinal', conv2, K*S, Fz, S, padding, phase_train, summary, False, False)
+
+            # Downsample the residual input if we did the conv layer. pool or strided
+            if DSC: X = self.incepted_downsample_3d(X, summary=summary)
             elif S>1: X = self.convolution_3d('ResDown', X, 2, K*S, S, phase_train=phase_train, BN=False, relu=False)
 
             # The Residual block
