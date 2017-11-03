@@ -216,14 +216,14 @@ class SODMatrix():
             # Perform the deconvolution. output_shape: A 1-D Tensor representing the output shape of the deconvolution op.
             conv = tf.nn.conv2d_transpose(X, kernel, output_shape=out_shape, strides=[1, S, S, 1], padding=padding)
 
+            # Apply the batch normalization. Updates weights during training phase only
+            if BN: conv = self.batch_normalization(conv, phase_train, scope)
+
             if concat_var is not None:
 
                 # Concatenate or add along the depth axis
                 if concat: conv = tf.concat([concat_var, conv], axis=-1)
                 else: conv = tf.add(conv, concat_var)
-
-            # Apply the batch normalization. Updates weights during training phase only
-            if BN: conv = self.batch_normalization(conv, phase_train, scope)
 
             # Relu
             if relu: conv = tf.nn.relu(conv, name=scope.name)
@@ -272,14 +272,14 @@ class SODMatrix():
                 out_shape[4] = K
 
             # Perform the deconvolution. output_shape: A 1-D Tensor representing the output shape of the deconvolution op.
-            dconv = tf.nn.conv3d_transpose(X, kernel, output_shape=out_shape, strides=[1, S, S, S, 1], padding=padding)
-
-            # Concatenate or add along the depth axis
-            if concat: conv = tf.concat([concat_var, dconv], axis=-1)
-            else: conv = tf.add(dconv, concat_var)
+            conv = tf.nn.conv3d_transpose(X, kernel, output_shape=out_shape, strides=[1, S, S, S, 1], padding=padding)
 
             # Apply the batch normalization. Updates weights during training phase only
             if BN: conv = self.batch_normalization(conv, phase_train, scope)
+
+            # Concatenate or add along the depth axis
+            if concat: conv = tf.concat([concat_var, conv], axis=-1)
+            else: conv = tf.add(conv, concat_var)
 
             # Relu
             if relu: conv = tf.nn.relu(conv, name=scope.name)
@@ -489,11 +489,11 @@ class SODMatrix():
             if DSC: X = self.incepted_downsample(X)
             elif S>1: X = self.convolution('ResDown', X, 2, K*S, S, phase_train=phase_train, BN=False, relu=False)
 
+            # Apply the batch normalization. Updates weights during training phase only
+            if BN: conv = self.batch_normalization(conv, phase_train, scope)
+
             # The Residual block
             residual = tf.add(conv, X)
-
-            # Apply the batch normalization. Updates weights during training phase only
-            if BN: residual = self.batch_normalization(residual, phase_train, scope)
 
             # Relu activation
             if relu: residual = tf.nn.relu(residual, name=scope.name)
@@ -546,11 +546,11 @@ class SODMatrix():
             if DSC: X = self.incepted_downsample_3d(X)
             elif S>1: X = self.convolution_3d('ResDown', X, 2, K*S, S, phase_train=phase_train, BN=False, relu=False)
 
+            # Apply the batch normalization. Updates weights during training phase only
+            if BN: conv = self.batch_normalization(conv, phase_train, 'BNRes')
+
             # The Residual block
             residual = tf.add(conv, X)
-
-            # Apply the batch normalization. Updates weights during training phase only
-            if BN: residual = self.batch_normalization(residual, phase_train, 'BNRes')
 
             # Relu activation
             if relu: residual = tf.nn.relu(residual, name=scope.name)
