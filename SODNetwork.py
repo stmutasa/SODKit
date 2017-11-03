@@ -1176,6 +1176,24 @@ class SODMatrix():
         return L2_loss
 
 
+    def pixel_wise_softmax(self, output_map):
+        """
+        calculates a pixel by pixel softmax score from a networks output map
+        :param output_map: the output logits of a unet for example
+        :return: the softmax pixel by pixel
+        """
+
+        # Exponentiate the values
+        exponential_map = tf.exp(output_map)
+
+        # Create the denominator
+        sum_exp = tf.reduce_sum(exponential_map, 3, keep_dims=True)
+        tensor_sum_exp = tf.tile(sum_exp, tf.stack([1, 1, 1, tf.shape(output_map)[3]]))
+
+        # return the result of the softmax
+        return tf.div(exponential_map, tensor_sum_exp)
+
+
     """
             Utility Functions
     """
