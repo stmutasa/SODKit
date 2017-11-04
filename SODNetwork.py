@@ -305,7 +305,16 @@ class SODMatrix():
         """
 
         # Set output feature maps
-        K = int(K/4)
+        orig_K = K
+        if S > 1: K = int(K/4)
+        else: K = int(3*K/8)
+
+        # Set BN and relu
+        if S ==1:
+            oBN = BN
+            orelu=relu
+            BN = True
+            relu=True
 
         # Implement an inception layer here ----------------
         with tf.variable_scope(scope) as scope:
@@ -337,6 +346,11 @@ class SODMatrix():
             # Concatenate the results for dimension of 64,64,256
             inception = tf.concat([inception1, inception2, inception3, inception4], axis=-1)
 
+            # Final projection
+            if S==1: inception = self.convolution('Inception_Fin', inception, 1, orig_K, 1, phase_train=phase_train,
+                                                  BN=oBN, relu=orelu)
+
+
             return inception
 
 
@@ -356,7 +370,16 @@ class SODMatrix():
         """
 
         # Set output feature maps
-        K = int(K / 4)
+        orig_K = K
+        if S > 1: K = int(K / 4)
+        else: K = int(3 * K / 8)
+
+        # Set BN and relu
+        if S == 1:
+            oBN = BN
+            orelu = relu
+            BN = True
+            relu = True
 
         # Implement an inception layer here ----------------
         with tf.variable_scope(scope) as scope:
@@ -387,6 +410,10 @@ class SODMatrix():
 
             # Concatenate the results
             inception = tf.concat([inception1, inception2, inception3, inception4], axis=-1)
+
+            # Final projection
+            if S == 1: inception = self.convolution_3d('Inception_Fin', inception, 1, orig_K, 1,
+                                                       phase_train=phase_train, BN=oBN, relu=orelu)
 
             return inception
 
