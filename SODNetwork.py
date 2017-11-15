@@ -58,14 +58,21 @@ class SODMatrix():
             kernel = tf.get_variable('Weights', shape=[F, F, C, K],
                                      initializer=tf.contrib.layers.variance_scaling_initializer())
 
+            # Define the biases
+            bias = tf.get_variable('Bias', shape=[K], initializer=tf.constant_initializer(0.0))
+
             # Add to the weights collection
             tf.add_to_collection('weights', kernel)
+            tf.add_to_collection('biases', bias)
 
             # Perform the actual convolution
             conv = tf.nn.conv2d(X, kernel, [1, S, S, 1], padding=padding)
 
             # Apply the batch normalization. Updates weights during training phase only
             if BN: conv = self.batch_normalization(conv, phase_train, scope)
+
+            # Add in the bias
+            conv = tf.nn.bias_add(conv, bias)
 
             # Relu activation
             if relu: conv = tf.nn.relu(conv, name=scope.name)
@@ -112,8 +119,12 @@ class SODMatrix():
             except: kernel = tf.get_variable('Weights', shape=[F, F, F, C, K],
                                      initializer=tf.contrib.layers.variance_scaling_initializer())
 
+            # Define the biases
+            bias = tf.get_variable('Bias', shape=[K], initializer=tf.constant_initializer(0.0))
+
             # Add to the weights collection
             tf.add_to_collection('weights', kernel)
+            tf.add_to_collection('biases', bias)
 
             # Perform the actual convolution
             try: conv = tf.nn.conv3d(X, kernel, [1, S[0], S[1], S[2], 1], padding=padding)
@@ -121,6 +132,9 @@ class SODMatrix():
 
             # Apply the batch normalization. Updates weights during training phase only
             if BN: conv = self.batch_normalization(conv, phase_train, scope)
+
+            # Add the bias
+            conv = tf.nn.bias_add(conv, bias)
 
             # Relu activation
             if relu: conv = tf.nn.relu(conv, name=scope.name)
@@ -159,14 +173,21 @@ class SODMatrix():
                 kernel = tf.get_variable('Weights', shape=[F, F, C, K],
                                          initializer=tf.contrib.layers.variance_scaling_initializer())
 
+                # Define the biases
+                bias = tf.get_variable('Bias', shape=[K], initializer=tf.constant_initializer(0.0))
+
                 # Add to the weights collection
                 tf.add_to_collection('weights', kernel)
+                tf.add_to_collection('biases', bias)
 
                 # Perform the actual convolution
                 conv = tf.nn.depthwise_conv2d(X, kernel, [1, S, S, 1], padding=padding)
 
                 # Apply the batch normalization. Updates weights during training phase only
                 if BN: conv = self.batch_normalization(conv, phase_train, 'DWC_Norm')
+
+                # Add the bias
+                conv = tf.nn.bias_add(conv, bias)
 
                 # Relu activation
                 if relu: conv = tf.nn.relu(conv, name=scope.name)
@@ -206,6 +227,13 @@ class SODMatrix():
             kernel = tf.get_variable('Weights', shape=[F, F, K, C],
                                      initializer=tf.contrib.layers.variance_scaling_initializer())
 
+            # Define the biases
+            bias = tf.get_variable('Bias', shape=[K], initializer=tf.constant_initializer(0.0))
+
+            # Add to the weights collection
+            tf.add_to_collection('weights', kernel)
+            tf.add_to_collection('biases', bias)
+
             # Define the output shape if not given
             if out_shape is None:
                 out_shape = X.get_shape().as_list()
@@ -224,6 +252,9 @@ class SODMatrix():
                 # Concatenate or add along the depth axis
                 if concat: conv = tf.concat([concat_var, conv], axis=-1)
                 else: conv = tf.add(conv, concat_var)
+
+            # Add in bias
+            conv = tf.nn.bias_add(conv, bias)
 
             # Relu
             if relu: conv = tf.nn.relu(conv, name=scope.name)
@@ -263,6 +294,13 @@ class SODMatrix():
             kernel = tf.get_variable('Weights', shape=[F, F, F, K, C],
                                      initializer=tf.contrib.layers.variance_scaling_initializer())
 
+            # Define the biases
+            bias = tf.get_variable('Bias', shape=[K], initializer=tf.constant_initializer(0.0))
+
+            # Add to the weights collection
+            tf.add_to_collection('weights', kernel)
+            tf.add_to_collection('biases', bias)
+
             # Define the output shape if not given
             if out_shape is None:
                 out_shape = X.get_shape().as_list()
@@ -280,6 +318,9 @@ class SODMatrix():
             # Concatenate or add along the depth axis
             if concat: conv = tf.concat([concat_var, conv], axis=-1)
             else: conv = tf.add(conv, concat_var)
+
+            # Add in bias
+            conv = tf.nn.bias_add(conv, bias)
 
             # Relu
             if relu: conv = tf.nn.relu(conv, name=scope.name)
@@ -512,7 +553,6 @@ class SODMatrix():
             else: conv = self.convolution('ConvFinal', conv2, F, K*S, S, padding, phase_train, summary, False, False)
 
             # Downsample the residual input if we did the conv layer. pool or strided
-            #if DSC: X = self.convolution('ResDown', X, 2, K, 1, 'SAME', phase_train, summary, False, False, True)
             if DSC: X = self.incepted_downsample(X)
             elif S>1: X = self.convolution('ResDown', X, 2, K*S, S, phase_train=phase_train, BN=False, relu=False)
 
@@ -747,11 +787,12 @@ class SODMatrix():
             # Initialize the weights
             weights = tf.get_variable('weights', shape=[height * width * channel, neurons])
 
-            # Add to the collection of weights
-            tf.add_to_collection('weights', weights)
+            # Define the biases
+            bias = tf.get_variable('Bias', shape=[neurons], initializer=tf.constant_initializer(0.0))
 
-            # Initialize the biases
-            biases = tf.get_variable('biases', shape=[neurons])
+            # Add to the weights collection
+            tf.add_to_collection('weights', weights)
+            tf.add_to_collection('biases', bias)
 
             # Reshape weights
             reshape = tf.reshape(weights, shape=[height, width, channel, neurons])
@@ -763,7 +804,7 @@ class SODMatrix():
             if BN: conv = self.batch_normalization(conv, phase_train, 'Fc7Norm')
 
             # Add biases
-            conv = tf.nn.bias_add(conv, biases, name='Bias')
+            conv = tf.nn.bias_add(conv, bias)
 
             # Optional relu
             if relu: conv = tf.nn.relu(conv, name=scope.name)
@@ -810,11 +851,12 @@ class SODMatrix():
             # Initialize the weights
             weights = tf.get_variable('weights', shape=[height * width * depth * channel, neurons])
 
-            # Add to the collection of weights
-            tf.add_to_collection('weights', weights)
+            # Define the biases
+            bias = tf.get_variable('Bias', shape=[neurons], initializer=tf.constant_initializer(0.0))
 
-            # Initialize the biases
-            biases = tf.get_variable('biases', shape=[neurons])
+            # Add to the weights collection
+            tf.add_to_collection('weights', weights)
+            tf.add_to_collection('biases', bias)
 
             # Reshape weights
             reshape = tf.reshape(weights, shape=[height, width, depth, channel, neurons])
@@ -826,7 +868,7 @@ class SODMatrix():
             if BN: conv = self.batch_normalization(conv, phase_train, 'Fc7Norm')
 
             # Add biases
-            conv = tf.nn.bias_add(conv, biases, name='Bias')
+            conv = tf.nn.bias_add(conv, bias, name='Bias')
 
             # Optional relu
             if relu: conv = tf.nn.relu(conv, name=scope.name)
@@ -923,8 +965,11 @@ class SODMatrix():
             # Add to the collection of weights
             tf.add_to_collection('weights', weights)
 
-            # Initialize the biases
-            biases = tf.Variable(np.ones(neurons), name='Bias', dtype=tf.float32)
+            # Define the biases
+            bias = tf.get_variable('Bias', shape=[neurons], initializer=tf.constant_initializer(0.0))
+
+            # Add to the weights collection
+            tf.add_to_collection('biases', bias)
 
             # Do the math
             linear = tf.matmul(X, weights)
@@ -933,7 +978,7 @@ class SODMatrix():
             if BN: linear = self.batch_normalization(linear, phase_train, 'LinearNorm')
 
             # add biases
-            linear = tf.add(linear, biases)
+            linear = tf.nn.bias_add(linear, bias)
 
             # relu for nonlinear linear layers. no relu for linear regressions
             if relu: linear = tf.nn.relu(linear, name=scope.name)
