@@ -1579,39 +1579,47 @@ class DenseNet(SODMatrix):
 
     # Variables constant to all instances here
 
-    def __init__(self, X, nb_blocks, filters, sess):
+    def __init__(self, nb_blocks, filters, sess, phase_train):
 
         # Variables accessible to only specific instances here:
         self.nb_blocks = nb_blocks
         self.filters = filters
         self.sess = sess
+        self.phase_train = phase_train
 
-    def bottleneck_layer(self, X, scope, phase_train):
+    def bottleneck_layer(self, X, scope, keep_prob=None):
         """
         Implements a bottleneck layer with BN-->ReLU -> 1x1 Conv -->BN/ReLU --> 3x3 conv
         :param x:  input
         :param scope: scope of the operations
+        :param phase_train: whether in training or testing
         :return: results
         """
 
         with tf.name_scope(scope):
 
             # Batch norm first
-            conv = self.batch_normalization(X, phase_train, scope)
+            conv = self.batch_normalization(X, self.phase_train, scope)
 
             # ReLU
             conv = tf.nn.relu(conv)
 
             # 1x1 conv: note BN and Relu applied by default
-            conv = self.convolution(scope, conv, 1, self.filters, 1, 'SAME', phase_train)
+            conv = self.convolution(scope, conv, 1, self.filters, 1, 'SAME', self.phase_train)
+
+            # Dropout (note this is after BN and relu in this case)
+            if keep_prob and self.phase_train==True: conv = tf.nn.dropout(conv, keep_prob)
 
             # 3x3 conv, don't apply BN and relu
-            conv = self.convolution(scope, conv, 3, self.filters, 1, 'SAME', phase_train, BN=False, relu=False)
+            conv = self.convolution(scope, conv, 3, self.filters, 1, 'SAME', self.phase_train, BN=False, relu=False)
+
+            # Dropout (note that this is before BN and relu)
+            if keep_prob and self.phase_train == True: conv = tf.nn.dropout(conv, keep_prob)
 
             return conv
 
 
-    def transition_layer(self, X, scope, phase_train):
+    def transition_layer(self, X, scope, keep_prob=None):
 
         """
         Transition layer for Densenet: not wide
@@ -1624,10 +1632,16 @@ class DenseNet(SODMatrix):
         with tf.name_scope(scope):
 
             # BN first
-            conv = self.batch_normalization(X, phase_train, scope)
+            conv = self.batch_normalization(X, self.phase_train, scope)
+
+            # ReLU
+            conv = tf.nn.relu(conv)
 
             # Conv 1x1
-            conv = self.convolution(scope, conv, 1, self.filters, 1, 'SAME', phase_train, BN=False, relu=False)
+            conv = self.convolution(scope, conv, 1, self.filters, 1, 'SAME', self.phase_train, BN=False, relu=False)
+
+            # Dropout
+            if keep_prob and self.phase_train == True: conv = tf.nn.dropout(conv, keep_prob)
 
             # Average pool
             conv = tf.nn.avg_pool(conv, [1, 2, 2, 1], [1, 2, 2, 1], 'VALID')
@@ -1635,7 +1649,7 @@ class DenseNet(SODMatrix):
             return conv
 
 
-    def dense_block(self, input_x, nb_layers, layer_name, phase_train):
+    def dense_block(self, input_x, nb_layers, layer_name):
 
         """
         Creates a dense block
@@ -1654,7 +1668,7 @@ class DenseNet(SODMatrix):
             layers_concat.append(input_x)
 
             # The first layer of this block
-            conv = self.bottleneck_layer(input_x, (layer_name+'_denseN_'+str(0)), phase_train)
+            conv = self.bottleneck_layer(input_x, (layer_name+'_denseN_'+str(0)), self.phase_train)
 
             # Loop through the number of layers desired
             for z in range(nb_layers):
@@ -1663,7 +1677,7 @@ class DenseNet(SODMatrix):
                 conv = tf.concat(layers_concat, axis=-1)
 
                 # Create a new layer
-                conv = self.bottleneck_layer(conv, (layer_name+'_denseN_'+str(z=1)), phase_train)
+                conv = self.bottleneck_layer(conv, (layer_name+'_denseN_'+str(z=1)), self.phase_train)
 
                 # Append this layer to the running list of dense connected layers
                 layers_concat.append(conv)
