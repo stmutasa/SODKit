@@ -248,7 +248,7 @@ class SODTester():
     def calculate_multiclass_metrics(self, logitz, labelz, step, n_classes, display=True, individual=False):
         """
         Calculates the metrics for a multiclass problem
-        :param logits: raw logits = will be softmaxed
+        :param logits: raw ONE HOT logits = will be softmaxed
         :param labels: raw labels = will be made one hot
         :param step: the current step
         :param n_classes: number of total classes

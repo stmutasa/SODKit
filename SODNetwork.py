@@ -9,11 +9,10 @@ import tensorflow as tf
 import numpy as np
 
 
-class SODMatrix():
+class SODMatrix(object):
 
-    """
-    SOD Loader class is a class for loading all types of data into protocol buffers
-    """
+    #  SOD Loader class is a class for loading all types of data into protocol buffers
+
 
     # Define training or testing phase
     training_phase = None
@@ -23,9 +22,8 @@ class SODMatrix():
         pass
 
 
-    """
-     Convolution wrappers
-    """
+    # *************** Convolution wrappers ***************
+
 
     def convolution(self, scope, X, F, K, S=2, padding='SAME', phase_train=None,
                     summary=True, BN=True, relu=True, downsample=False):
@@ -459,58 +457,6 @@ class SODMatrix():
             return inception
 
 
-    def incepted_downsample(self, X, S=2, padding='SAME', summary=True):
-        """
-        This function implements a downsampling layer that utilizes both an average and max pooling operation
-        :param scope:
-        :param X: Output of the previous layer
-        :param S: The degree of downsampling or stride
-        :param padding: SAME or VALID
-        :param summary: whether to produce a tensorboard summary of this layer
-        :return: the layer output after concat
-        """
-
-        # 1st branch, AVG pool
-        avg = tf.nn.avg_pool(X, [1, 2, 2, 1], [1, S, S, 1], padding)
-
-        # 2nd branch, max pool
-        maxi = tf.nn.max_pool(X, [1, 2, 2, 1], [1, S, S, 1], padding)
-
-        # Concatenate the results
-        inception = tf.concat([avg, maxi], -1)
-
-        # Create a histogram/scalar summary of the conv1 layer
-        if summary: self._activation_summary(inception)
-
-        return inception
-
-
-    def incepted_downsample_3d(self, X, S=2, padding='SAME', summary=True):
-        """
-        This function implements a 3d downsampling layer that utilizes both an average and max pooling operation
-        :param scope:
-        :param X: Output of the previous layer
-        :param S: The degree of downsampling or stride
-        :param padding: SAME or VALID
-        :param summary: whether to produce a tensorboard summary of this layer
-        :return: the layer output after concat
-        """
-
-        # 1st branch, AVG pool
-        avg = tf.nn.avg_pool3d(X, [1, 2, 2, 2, 1], [1, S, S, S, 1], padding)
-
-        # 2nd branch, max pool
-        maxi = tf.nn.max_pool3d(X, [1, 2, 2, 2, 1], [1, S, S, S, 1], padding)
-
-        # Concatenate the results
-        inception = tf.concat([avg, maxi], -1)
-
-        # Create a histogram/scalar summary of the conv1 layer
-        if summary: self._activation_summary(inception)
-
-        return inception
-
-
     def residual_layer(self, scope, X, F, K, S=2, K_prob=None, padding='SAME',
                        phase_train=None, summary=True, DSC=False, BN=False, relu=False):
         """
@@ -742,21 +688,7 @@ class SODMatrix():
             return residual
 
 
-    def _activation_summary(self, x):
-        """
-        Helper to create summaries for activations
-            Creates a summary to measure the proportion of your W in x that is all zero
-            Parameters: x = a tensor
-            Returns: Nothing
-        """
-
-        # Output a summary protobuf with a histogram of x
-        tf.summary.histogram(x.op.name + '/activations', x)
-
-        # " but with a scalar of the fraction of 0's
-        tf.summary.scalar(x.op.name + '/sparsity', tf.nn.zero_fraction(x))
-
-        return
+    # ***************  Miscellaneous layers ***************
 
 
     def fc7_layer(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5,
@@ -1032,7 +964,7 @@ class SODMatrix():
             return h_trans
 
 
-    def transition_layer(self, scope, X, K, S=1, padding='SAME', phase_train=None, summary=True, BN=True, relu=True):
+    def transitional_layer(self, scope, X, K, S=1, padding='SAME', phase_train=None, summary=True, BN=True, relu=True):
         """
         This function implements a transition layer to insert before the FC layer. Improves regularization
         :param scope:
@@ -1070,9 +1002,99 @@ class SODMatrix():
             return tf.squeeze(inception)
 
 
-    """
-         Loss function wrappers
-    """
+    def incepted_downsample(self, X, S=2, padding='SAME', summary=True):
+        """
+        This function implements a downsampling layer that utilizes both an average and max pooling operation
+        :param scope:
+        :param X: Output of the previous layer
+        :param S: The degree of downsampling or stride
+        :param padding: SAME or VALID
+        :param summary: whether to produce a tensorboard summary of this layer
+        :return: the layer output after concat
+        """
+
+        # 1st branch, AVG pool
+        avg = tf.nn.avg_pool(X, [1, 2, 2, 1], [1, S, S, 1], padding)
+
+        # 2nd branch, max pool
+        maxi = tf.nn.max_pool(X, [1, 2, 2, 1], [1, S, S, 1], padding)
+
+        # Concatenate the results
+        inception = tf.concat([avg, maxi], -1)
+
+        # Create a histogram/scalar summary of the conv1 layer
+        if summary: self._activation_summary(inception)
+
+        return inception
+
+
+    def incepted_downsample_3d(self, X, S=2, padding='SAME', summary=True):
+        """
+        This function implements a 3d downsampling layer that utilizes both an average and max pooling operation
+        :param scope:
+        :param X: Output of the previous layer
+        :param S: The degree of downsampling or stride
+        :param padding: SAME or VALID
+        :param summary: whether to produce a tensorboard summary of this layer
+        :return: the layer output after concat
+        """
+
+        # 1st branch, AVG pool
+        avg = tf.nn.avg_pool3d(X, [1, 2, 2, 2, 1], [1, S, S, S, 1], padding)
+
+        # 2nd branch, max pool
+        maxi = tf.nn.max_pool3d(X, [1, 2, 2, 2, 1], [1, S, S, S, 1], padding)
+
+        # Concatenate the results
+        inception = tf.concat([avg, maxi], -1)
+
+        # Create a histogram/scalar summary of the conv1 layer
+        if summary: self._activation_summary(inception)
+
+        return inception
+
+
+    def global_avg_pool(self, X, S=1, padding='VALID'):
+
+        """
+        Implements global average pooling
+        :param X: input layer
+        :param S: stride of pool
+        :param padding: if you want to pad for whatever reason
+        :return: output of dimension 1
+        """
+
+        # First retreive dimensions of input
+        Fx = X.get_shape().as_list()[1]
+        Fy = X.get_shape().as_list()[2]
+
+        # Now perform pool operation
+        return tf.nn.avg_pool(X, [1, Fx, Fy, 1], [1, S, S, 1], padding)
+
+
+    def global_avg_pool3D(self, X, S=1, padding='VALID'):
+
+        """
+        Implements global average pooling
+        :param X: input layer
+        :param S: stride of pool
+        :param padding: if you want to pad for whatever reason
+        :return: output of dimension 1
+        """
+
+        # First retreive dimensions of input
+        Fx = X.get_shape().as_list()[1]
+        Fy = X.get_shape().as_list()[2]
+        Fz = X.get_shape().as_list()[3]
+
+        # Now perform pool operation
+        return tf.nn.avg_pool3d(X, [1, Fx, Fy, Fz, 1], [1, S, S, S, 1], padding)
+
+
+
+    # ***************  Loss function wrappers ***************
+
+
 
     def segmentation_SCE_loss(self, logits, labelz, class_factor=1.2, summary=True):
         """
@@ -1266,9 +1288,74 @@ class SODMatrix():
         return tf.div(exponential_map, tensor_sum_exp)
 
 
-    """
-            Utility Functions
-    """
+    def DICE_loss(self, logitz, labelz, num_classes=2, network_dims=64, summary=True):
+
+        """
+        Cost function
+        :param logitz: The raw log odds units output from the network
+        :param labelz: The labels: not one hot encoded
+        :param num_classes: number of classes predicted
+        :param class_weights: class weight array
+        :param loss_type: DICE or other to use dice or weighted
+        :return:
+        """
+
+        # Reduce dimensionality
+        labelz = tf.squeeze(labelz)
+
+        # Remove background label
+        labels = tf.cast(labelz > 1, tf.uint8)
+
+        # Summary images
+        if summary:
+            tf.summary.image('Labels', tf.reshape(tf.cast(labels[2], tf.float32), shape=[1, network_dims, network_dims, 1]), 2)
+            tf.summary.image('Logits', tf.reshape(logitz[2, :, :, 1], shape=[1, network_dims, network_dims, 1]), 2)
+
+        # Make labels one hot
+        labels = tf.cast(tf.one_hot(labels, depth=2, dtype=tf.uint8), tf.float32)
+
+        # Generate mask
+        mask = tf.expand_dims(tf.cast(labelz > 0, tf.float32), -1)
+
+        # Apply mask
+        logits, labels = logitz * mask, labels * mask
+
+        # Flatten
+        logits = tf.reshape(logits, [-1, num_classes])
+        labels = tf.reshape(labels, [-1, num_classes])
+
+        # To prevent number errors:
+        eps = 1e-5
+
+        # Calculate softmax:
+        logits = tf.nn.softmax(logits)
+
+        # Find the intersection
+        intersection = 2 * tf.reduce_sum(logits * labels)
+
+        # find the union
+        union = eps + tf.reduce_sum(logits) + tf.reduce_sum(labels)
+
+        # Calculate the loss
+        dice = intersection / union
+
+        # Output the training DICE score
+        tf.summary.scalar('DICE_Score', dice)
+
+        # 1-DICE since we want better scores to have lower loss
+        loss = 1 - dice
+
+        # Output the Loss
+        tf.summary.scalar('Loss_Raw', loss)
+
+        # Add these losses to the collection
+        tf.add_to_collection('losses', loss)
+
+        return loss
+
+
+    # *************** Utility Functions ***************
+
 
     def batch_normalization(self, conv, phase_train, scope):
 
@@ -1469,3 +1556,116 @@ class SODMatrix():
             indices = [[i] * num_transforms for i in range(num_batch)]
             input_repeated = tf.gather(U, tf.reshape(indices, [-1]))
             return self.transformer(input_repeated, thetas, out_size)
+
+
+    def _activation_summary(self, x):
+        """
+        Helper to create summaries for activations
+            Creates a summary to measure the proportion of your W in x that is all zero
+            Parameters: x = a tensor
+            Returns: Nothing
+        """
+
+        # Output a summary protobuf with a histogram of x
+        tf.summary.histogram(x.op.name + '/activations', x)
+
+        # " but with a scalar of the fraction of 0's
+        tf.summary.scalar(x.op.name + '/sparsity', tf.nn.zero_fraction(x))
+
+        return
+
+
+class DenseNet(SODMatrix):
+
+    # Variables constant to all instances here
+
+    def __init__(self, X, nb_blocks, filters, sess):
+
+        # Variables accessible to only specific instances here:
+        self.nb_blocks = nb_blocks
+        self.filters = filters
+        self.sess = sess
+
+    def bottleneck_layer(self, X, scope, phase_train):
+        """
+        Implements a bottleneck layer with BN-->ReLU -> 1x1 Conv -->BN/ReLU --> 3x3 conv
+        :param x:  input
+        :param scope: scope of the operations
+        :return: results
+        """
+
+        with tf.name_scope(scope):
+
+            # Batch norm first
+            conv = self.batch_normalization(X, phase_train, scope)
+
+            # ReLU
+            conv = tf.nn.relu(conv)
+
+            # 1x1 conv: note BN and Relu applied by default
+            conv = self.convolution(scope, conv, 1, self.filters, 1, 'SAME', phase_train)
+
+            # 3x3 conv, don't apply BN and relu
+            conv = self.convolution(scope, conv, 3, self.filters, 1, 'SAME', phase_train, BN=False, relu=False)
+
+            return conv
+
+
+    def transition_layer(self, X, scope, phase_train):
+
+        """
+        Transition layer for Densenet: not wide
+        :param X: input
+        :param scope: scope
+        :param phase_train:
+        :return:
+        """
+
+        with tf.name_scope(scope):
+
+            # BN first
+            conv = self.batch_normalization(X, phase_train, scope)
+
+            # Conv 1x1
+            conv = self.convolution(scope, conv, 1, self.filters, 1, 'SAME', phase_train, BN=False, relu=False)
+
+            # Average pool
+            conv = tf.nn.avg_pool(conv, [1, 2, 2, 1], [1, 2, 2, 1], 'VALID')
+
+            return conv
+
+
+    def dense_block(self, input_x, nb_layers, layer_name, phase_train):
+
+        """
+        Creates a dense block
+        :param input_x: The input to this dense block (output of prior downsample operation)
+        :param nb_layers: how many layers desired
+        :param layer_name: base name of this block
+        :return:
+        """
+
+        with tf.name_scope(layer_name):
+
+            # Array to hold each layer
+            layers_concat = []
+
+            # Append to list
+            layers_concat.append(input_x)
+
+            # The first layer of this block
+            conv = self.bottleneck_layer(input_x, (layer_name+'_denseN_'+str(0)), phase_train)
+
+            # Loop through the number of layers desired
+            for z in range(nb_layers):
+
+                # Concat all the prior layer into this layer
+                conv = tf.concat(layers_concat, axis=-1)
+
+                # Create a new layer
+                conv = self.bottleneck_layer(conv, (layer_name+'_denseN_'+str(z=1)), phase_train)
+
+                # Append this layer to the running list of dense connected layers
+                layers_concat.append(conv)
+
+            return conv
