@@ -162,7 +162,7 @@ class SODMatrix(object):
             """
 
             # Set channel size based on input depth
-            C = X.get_shape().as_list()[3]
+            C = X.get_shape().as_list()[-1]
 
             # Set the scope
             with tf.variable_scope(scope) as scope:
@@ -1611,7 +1611,7 @@ class DenseNet(SODMatrix):
             if keep_prob and self.phase_train==True: conv = tf.nn.dropout(conv, keep_prob)
 
             # 3x3 conv, don't apply BN and relu
-            conv = self.convolution(scope, conv, 3, self.filters, 1, 'SAME', self.phase_train, BN=False, relu=False)
+            conv = self.convolution(scope+'_2', conv, 3, self.filters, 1, 'SAME', self.phase_train, BN=False, relu=False)
 
             # Dropout (note that this is before BN and relu)
             if keep_prob and self.phase_train == True: conv = tf.nn.dropout(conv, keep_prob)
@@ -1649,13 +1649,15 @@ class DenseNet(SODMatrix):
             return conv
 
 
-    def dense_block(self, input_x, nb_layers, layer_name):
+    def dense_block(self, input_x, nb_layers, layer_name, keep_prob=None, downsample=False):
 
         """
         Creates a dense block
         :param input_x: The input to this dense block (output of prior downsample operation)
         :param nb_layers: how many layers desired
         :param layer_name: base name of this block
+        :param keep_prob: Whether to use dropout
+        :param trans: whether to include a downsample at the end
         :return:
         """
 
@@ -1668,7 +1670,7 @@ class DenseNet(SODMatrix):
             layers_concat.append(input_x)
 
             # The first layer of this block
-            conv = self.bottleneck_layer(input_x, (layer_name+'_denseN_'+str(0)), self.phase_train)
+            conv = self.bottleneck_layer(input_x, (layer_name+'_denseN_0'), keep_prob)
 
             # Loop through the number of layers desired
             for z in range(nb_layers):
@@ -1677,9 +1679,11 @@ class DenseNet(SODMatrix):
                 conv = tf.concat(layers_concat, axis=-1)
 
                 # Create a new layer
-                conv = self.bottleneck_layer(conv, (layer_name+'_denseN_'+str(z=1)), self.phase_train)
+                conv = self.bottleneck_layer(conv, (layer_name+'_denseN_'+str(z+1)), keep_prob)
 
                 # Append this layer to the running list of dense connected layers
                 layers_concat.append(conv)
+
+            if downsample: conv = self.transition_layer(conv, (layer_name+'_Downsample'), keep_prob)
 
             return conv
