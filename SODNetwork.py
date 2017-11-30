@@ -1587,6 +1587,7 @@ class DenseNet(SODMatrix):
         self.sess = sess
         self.phase_train = phase_train
 
+
     def bottleneck_layer(self, X, scope, keep_prob=None):
         """
         Implements a bottleneck layer with BN-->ReLU -> 1x1 Conv -->BN/ReLU --> 3x3 conv
@@ -1687,3 +1688,150 @@ class DenseNet(SODMatrix):
             if downsample: conv = self.transition_layer(conv, (layer_name+'_Downsample'), keep_prob)
 
             return conv
+
+
+class DenseUnet(DenseNet):
+
+    """
+    Class for creating unets Dense style
+    """
+
+    def __init__(self, nb_blocks, nb_layers, filters, images, filter_growth, phase_train):
+
+        # Variables accessible to only specific instances here:
+        self.nb_blocks = nb_blocks
+        self.filters = filters
+        self.nb_layers = nb_layers
+        self.phase_train = phase_train
+        self.images = images
+        self.filter_growth = filter_growth
+
+
+    def dense_block(self, input_x, nb_layers, layer_name, keep_prob=None, downsample=False):
+
+        """
+        Creates a dense block
+        :param input_x: The input to this dense block (output of prior downsample operation)
+        :param nb_layers: how many layers desired
+        :param layer_name: base name of this block
+        :param keep_prob: Whether to use dropout
+        :param trans: whether to include a downsample at the end
+        :return:
+        """
+
+        with tf.name_scope(layer_name):
+
+            # Array to hold each layer
+            layers_concat = []
+
+            # Append to list
+            layers_concat.append(input_x)
+
+            # The first layer of this block
+            conv = self.bottleneck_layer(input_x, (layer_name+'_denseN_0'), keep_prob)
+
+            # Loop through the number of layers desired
+            for z in range(nb_layers):
+
+                # Concat all the prior layer into this layer
+                conv = tf.concat(layers_concat, axis=-1)
+
+                # Create a new layer
+                conv = self.bottleneck_layer(conv, (layer_name+'_denseN_'+str(z+1)), keep_prob)
+
+                # Append this layer to the running list of dense connected layers
+                layers_concat.append(conv)
+
+            if downsample: conv = self.transition_layer(conv, (layer_name+'_Downsample'), keep_prob)
+
+            return conv, layers_concat
+
+
+    def up_transition(self, scope, X, F, K, S, concat_var=None, summary=True, padding='VALID'):
+
+        """
+        Deconvolutions for the DenseUnet
+        :param scope:
+        :param X:
+        :param F:
+        :param K:
+        :param S:
+        :param padding:
+        :param concat_var:
+        :param summary:
+        :return:
+        """
+
+        with tf.variable_scope(scope) as scope:
+
+            # Set channel size based on input depth
+            C = X.get_shape().as_list()[-1]
+
+            # He init
+            kernel = tf.get_variable('Weights', shape=[F, F, K, C], initializer=tf.contrib.layers.variance_scaling_initializer())
+
+            # Define the biases
+            bias = tf.get_variable('Bias', shape=[K], initializer=tf.constant_initializer(0.0))
+
+            # Add to the weights collection
+            tf.add_to_collection('weights', kernel)
+            tf.add_to_collection('biases', bias)
+
+            # Define the output shape
+            out_shape = X.get_shape().as_list()
+            out_shape[1] *= 2
+            out_shape[2] *= 2
+            out_shape[3] = K
+
+            # Perform the deconvolution. output_shape: A 1-D Tensor representing the output shape of the deconvolution op.
+            conv = tf.nn.conv2d_transpose(X, kernel, output_shape=out_shape, strides=[1, S, S, 1], padding=padding)
+
+            # Concatenate
+            conv = tf.concat([concat_var, conv], axis=-1)
+
+            # Add in bias
+            conv = tf.nn.bias_add(conv, bias)
+
+            # Create a histogram summary and summary of sparsity
+            if summary: self._activation_summary(conv)
+
+            return conv
+
+
+    def define_network(self, layers = [], keep_prob=None):
+
+        # conv holds output of bottleneck layers (no BN/ReLU). Concat holds running lists of skip connections
+        conv, concat = [self.nb_blocks+1], [self.nb_blocks-1]
+
+        # Define the first layers before starting the Dense blocks
+        conv[0] = self.convolution('Conv1', self.images, 3, 2*layers[0], 1, phase_train=self.phase_train, BN=False, relu=False)
+
+        # Loop through and make the downsample blocks
+        for z in range (self.nb_blocks):
+
+            # Z holds the prior index, X holds the layer index
+            x = z+1
+
+            # Generate a dense block
+            conv[x], concat[z] = self.dense_block(conv[z], layers[z], 'Dense_'+str(x), keep_prob)
+
+            # Downsample unless at the end
+            if x < self.nb_blocks: conv[x] = self.transition_layer(conv[x], 'Downsample_'+str(x), keep_prob)
+
+        # Set first dconv to output of final conv
+        deconv = tf.nn.relu(self.batch_normalization(conv[self.nb_blocks+1], self.phase_train, 'BNa'))
+
+        # Now loop through and perform the upsamples. No longer need to store these
+        for z in range(self.nb_blocks):
+
+            # Z holds the prior index, X holds the layer index
+            x = z+1
+
+            # Perform upsample unless at the end
+            if x < self.nb_blocks: deconv = self.up_transition('Upsample_'+str(x), deconv, 3, self.filters, 2, concat[-x])
+
+            # Generate a dense block
+            deconv, _ = self.dense_block(conv[z], layers[z], 'Up_Dense_' + str(x), keep_prob)
+
+        # Return final layer after batch norm and relu
+        return tf.nn.relu(self.batch_normalization(deconv, self.phase_train, 'BNa'))
