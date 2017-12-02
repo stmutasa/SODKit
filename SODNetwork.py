@@ -1754,15 +1754,13 @@ class DenseUnet(DenseNet):
     Class for creating unets Dense style
     """
 
-    def __init__(self, nb_blocks, nb_layers, filters, images, filter_growth, phase_train):
+    def __init__(self, nb_blocks, filters, images, phase_train):
 
         # Variables accessible to only specific instances here:
         self.nb_blocks = nb_blocks
         self.filters = filters
-        self.nb_layers = nb_layers
         self.phase_train = phase_train
         self.images = images
-        self.filter_growth = filter_growth
 
 
     def dense_block(self, input_x, nb_layers, layer_name, keep_prob=None, downsample=False):
@@ -1828,7 +1826,7 @@ class DenseUnet(DenseNet):
             layers_concat.append(input_x)
 
             # The first layer of this block
-            conv = self.bottleneck_layer(input_x, (layer_name+'_denseN_0'), keep_prob)
+            conv = self.bottleneck_layer_3d(input_x, (layer_name+'_denseN_0'), keep_prob)
 
             # Concat the first layer
             layers_concat.append(conv)
@@ -1840,21 +1838,22 @@ class DenseUnet(DenseNet):
                 conv = tf.concat(layers_concat, axis=-1)
 
                 # Create a new layer
-                conv = self.bottleneck_layer(conv, (layer_name+'_denseN_'+str(z+1)), keep_prob)
+                conv = self.bottleneck_layer_3d(conv, (layer_name+'_denseN_'+str(z+1)), keep_prob)
 
                 # Append this layer to the running list of dense connected layers
                 layers_concat.append(conv)
 
             # The concat has to be 2D, first retreive the Z and K size
-            Fz, Ch = conv.get_shape().as_list()[1], conv.get_shape().as_list()[-1]
+            concat = tf.concat(layers_concat, -1)
+            Fz, Ch = concat.get_shape().as_list()[1], concat.get_shape().as_list()[-1]
 
             # Now create a projection matrix
-            concat = self.convolution_3d(layer_name+'_projection', tf.concat(layers_concat, -1), [Fz, 1, 1], Ch, 1, 'SAME', self.phase_train, BN=False)
+            concat = self.convolution_3d(layer_name+'_projection', concat, [Fz, 1, 1], Ch, 1, 'VALID', self.phase_train, BN=False)
 
             return conv, tf.squeeze(concat)
 
 
-    def up_transition(self, scope, X, F, K, S, concat_var=None, summary=True, padding='VALID'):
+    def up_transition(self, scope, X, F, K, S, concat_var=None, summary=True, padding='SAME'):
 
         """
         Deconvolutions for the DenseUnet
@@ -1893,11 +1892,11 @@ class DenseUnet(DenseNet):
             # Perform the deconvolution. output_shape: A 1-D Tensor representing the output shape of the deconvolution op.
             conv = tf.nn.conv2d_transpose(X, kernel, output_shape=out_shape, strides=[1, S, S, 1], padding=padding)
 
-            # Concatenate
-            conv = tf.concat([concat_var, conv], axis=-1)
-
             # Add in bias
             conv = tf.nn.bias_add(conv, bias)
+
+            # Concatenate
+            conv = tf.concat([concat_var, conv], axis=-1)
 
             # Create a histogram summary and summary of sparsity
             if summary: self._activation_summary(conv)
@@ -1945,11 +1944,11 @@ class DenseUnet(DenseNet):
             # Perform the deconvolution. output_shape: A 1-D Tensor representing the output shape of the deconvolution op.
             conv = tf.nn.conv2d_transpose(X, kernel, output_shape=out_shape, strides=[1, S, S, S, 1], padding=padding)
 
-            # Concatenate
-            conv = tf.concat([concat_var, conv], axis=-1)
-
             # Add in bias
             conv = tf.nn.bias_add(conv, bias)
+
+            # Concatenate
+            conv = tf.concat([concat_var, conv], axis=-1)
 
             # Create a histogram summary and summary of sparsity
             if summary: self._activation_summary(conv)
@@ -1960,7 +1959,7 @@ class DenseUnet(DenseNet):
     def define_network(self, layers = [], keep_prob=None):
 
         # conv holds output of bottleneck layers (no BN/ReLU). Concat holds running lists of skip connections
-        conv, concat = [self.nb_blocks+1], [self.nb_blocks-1]
+        conv, concat = [None] * (self.nb_blocks + 1), [None] * (self.nb_blocks - 1)
 
         # Define the first layers before starting the Dense blocks
         conv[0] = self.convolution('Conv1', self.images, 3, 2*self.filters, 1, phase_train=self.phase_train, BN=False, relu=False)
@@ -1978,7 +1977,7 @@ class DenseUnet(DenseNet):
             if x < self.nb_blocks: conv[x] = self.transition_layer(conv[x], 'Downsample_'+str(x), keep_prob)
 
         # Set first dconv to output of final conv
-        deconv = tf.nn.relu(self.batch_normalization(conv[self.nb_blocks+1], self.phase_train, 'BNa'))
+        deconv = tf.nn.relu(self.batch_normalization(conv[-1], self.phase_train, None))
 
         # Now loop through and perform the upsamples. No longer need to store these
         for z in range(self.nb_blocks):
@@ -1990,16 +1989,16 @@ class DenseUnet(DenseNet):
             if x < self.nb_blocks: deconv = self.up_transition('Upsample_'+str(x), deconv, 3, self.filters, 2, concat[-x])
 
             # Generate a dense block
-            deconv, _ = self.dense_block(deconv, layers[z], 'Up_Dense_' + str(x), keep_prob)
+            deconv, _ = self.dense_block(deconv, layers[-(z+2)], 'Up_Dense_' + str(x), keep_prob)
 
         # Return final layer after batch norm and relu
         return tf.nn.relu(self.batch_normalization(deconv, self.phase_train, 'BNa'))
 
 
-    def define_network_25D(self, layers = [], keep_prob=None):
+    def define_network_25D(self, layers = [], keep_prob=None, prints=True):
 
         # conv holds output of bottleneck layers (no BN/ReLU). Concat holds running lists of skip connections
-        conv, concat = [self.nb_blocks+1], [self.nb_blocks-1]
+        conv, concat = [None]*(self.nb_blocks+1), [None]*(self.nb_blocks-1)
 
         # Define the first layers before starting the Dense blocks
         conv[0] = self.convolution_3d('Conv1', self.images, [1, 3, 3], 2*self.filters, 1, 'SAME', self.phase_train, BN=False, relu=False)
@@ -2011,20 +2010,24 @@ class DenseUnet(DenseNet):
             x = z+1
 
             # Retreive number of slices here
-            slices = self.conv[z].get_shape().as_list()[1]
+            slices = conv[z].get_shape().as_list()[1]
+
+            # Error handling for when we are down to rank 4
+            if len(conv[z].get_shape().as_list()) == 4: slices=1
 
             # Generate a dense block. 3D if slices > 1
             if slices > 1: conv[x], concat[z] = self.dense_block_3d(conv[z], layers[z], 'Dense_'+str(x), keep_prob)
-            else: conv[x], concat[z] = self.dense_block(tf.squeeze(conv[z]), layers[z], 'Dense_'+str(x), keep_prob)
+            else: conv[x], _ = self.dense_block(tf.squeeze(conv[z]), layers[z], 'Dense_'+str(x), keep_prob)
 
             # Downsample unless at the end
-            if x < self.nb_blocks: conv[x] = self.transition_layer_3d(conv[x], 'Downsample_'+str(x))
+            if x < self.nb_blocks and slices > 1: conv[x] = self.transition_layer_3d(conv[x], 'Downsample_'+str(x))
+            elif x < self.nb_blocks and slices ==1: conv[x] = self.transition_layer(conv[x], 'Downsample_'+str(x), keep_prob)
 
         # Set first dconv to output of final conv
-        deconv = tf.nn.relu(self.batch_normalization(conv[self.nb_blocks+1], self.phase_train, None))
+        deconv = tf.nn.relu(self.batch_normalization(conv[-1], self.phase_train, None))
 
         # Now loop through and perform the upsamples. No longer need to store these. These are 2D
-        for z in range(self.nb_blocks):
+        for z in range(self.nb_blocks-1):
 
             # Z holds the prior index, X holds the layer index
             x = z+1
@@ -2033,7 +2036,7 @@ class DenseUnet(DenseNet):
             if x < self.nb_blocks: deconv = self.up_transition('Upsample_'+str(x), deconv, 3, self.filters, 2, concat[-x])
 
             # Generate a dense block
-            deconv, _ = self.dense_block(deconv, layers[z], 'Up_Dense_' + str(x), keep_prob)
+            deconv, _ = self.dense_block(deconv, layers[-(z+2)], 'Up_Dense_' + str(x), keep_prob)
 
         # Return final layer after batch norm and relu
         return tf.nn.relu(self.batch_normalization(deconv, self.phase_train, None))
