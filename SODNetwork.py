@@ -2021,7 +2021,7 @@ class DenseUnet(DenseNet):
 
             # Downsample unless at the end
             if x < self.nb_blocks and slices > 1: conv[x] = self.transition_layer_3d(conv[x], 'Downsample_'+str(x))
-            elif x < self.nb_blocks and slices ==1: conv[x] = self.transition_layer(conv[x], 'Downsample_'+str(x), keep_prob)
+            elif x < self.nb_blocks and slices ==1: conv[x] = self.transition_layer(conv[x], 'Downsample_'+str(x))
 
         # Set first dconv to output of final conv
         deconv = tf.nn.relu(self.batch_normalization(conv[-1], self.phase_train, None))
