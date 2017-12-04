@@ -5,7 +5,7 @@ mean absolute error, mean squared error, DICE score, sensitivity, specificity, A
 
 """
 
-import os, glob
+import os, glob, argparse
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,6 +13,7 @@ import sklearn.metrics as skm
 import pandas as pd
 
 from scipy import interp
+import tensorflow as tf
 
 
 class SODTester():
@@ -389,6 +390,104 @@ class SODTester():
                 print('Micro AUC: %.3f, Macro AUC: %.3f' % (self.roc_auc['micro'], self.roc_auc["macro"]))
 
 
+    def freeze_graph_checkpoint(self, model_dir, output_node_names=None, mon_sess=None):
+
+        """
+        Saves a frozen graph for inference only
+        :param model_dir: location of the model checkpoint files or name of checkpoint file
+        :param output_node_names: string containing all the output node names
+        :param mon_sess: if defined, saves during the current session. else creates a new one
+        :return:
+        """
+
+        # if mon_sess:
+        #
+        #     # Define the file fullname of the freezed graph
+        #     output_graph = model_dir + "/frozen_model.pb"
+        #
+        #     # export the variables to constants
+        #     output_graph_def = tf.graph_util.convert_variables_to_constants(mon_sess, tf.get_default_graph().as_graph_def(), output_node_names.split(','))
+        #
+        #     # Serialize the output graph to the filesystem
+        #     with tf.gfile.GFile(output_graph, 'wb') as f:
+        #         f.write(output_graph_def.SerializeToString())
+        #
+        #     print("%d ops in the final graph." % len(output_graph_def.node))
+        #
+        #     return output_graph_def
+
+        # graph_def = mon_sess.graph.as_graph_def()
+        # for node in graph_def.node:
+        #     if 'Softmax' in node.name: print(node)
+
+        if mon_sess:
+
+            # Retreive all the node names
+            graph = mon_sess.graph
+            node_names = [node.name for node in graph.as_graph_def().node]
+
+            # define frozen graph
+            frozen_graph_def = tf.graph_util.convert_variables_to_constants(mon_sess, tf.get_default_graph().as_graph_def(), node_names)
+            # frozen_graph_def = tf.graph_util.convert_variables_to_constants(mon_sess, tf.get_default_graph().as_graph_def(), ['Softmax/weights_1/tag'])
+
+            # Write the frozen graph to disk
+            with tf.gfile.GFile(model_dir+'frozen.pb', 'wb') as f:
+                f.write(frozen_graph_def.SerializeToString())
+
+            return frozen_graph_def
+
+        # Error checking
+        if not tf.gfile.Exists(model_dir): print('Directory %s does not exist!' % model_dir)
+        if not output_node_names: print('Please supply the name of an output node!')
+
+        # Retreive the checkpoint full path
+        checkpoint = tf.train.get_checkpoint_state(model_dir)
+        input_checkpoint = checkpoint.model_checkpoint_path
+
+        # Define the file fullname of the freezed graph
+        output_graph = "/".join(input_checkpoint.split('/')[:-1]) + "/frozen_model.pb"
+
+        # Start a session with a temporary fresh graph
+        with tf.Session(graph=tf.Graph()) as sess:
+
+            # import the meta graph
+            saver = tf.train.import_meta_graph(input_checkpoint + '.meta', clear_devices=True)
+
+            # Restore the weights
+            saver.restore(sess, input_checkpoint)
+
+            # export the variables to constants
+            output_graph_def = tf.graph_util.convert_variables_to_constants(sess, tf.get_default_graph().as_graph_def(), output_node_names.split(','))
+
+            # Serialize the output graph to the filesystem
+            with tf.gfile.GFile(output_graph, 'wb') as f:
+                f.write(output_graph_def.SerializeToString())
+
+            print ("%d ops in the final graph." %len(output_graph_def.node))
+
+        return output_graph_def
+
+
+    def load_frozen_checkpoint(self, filename):
+
+        # Load file I/O wrapper
+        with tf.gfile.GFile(filename, 'rb') as f:
+
+            # Instantialize a graphdef object that we will populate
+            graph_def = tf.GraphDef()
+
+            # Populate the object with the binary input
+            graph_def.ParseFromString(f.read())
+
+        # Now import the object into a new graph and return it
+        with tf.Graph().as_default() as graph:
+
+            # Import
+            tf.import_graph_def(graph_def, name='prefix')
+
+        return graph
+
+
     def calc_softmax(self, X):
         """
         Computes the softmax of a given vector
@@ -535,11 +634,11 @@ class SODTester():
     def combine_predictions(self, ground_truth, predictions, unique_ID, batch_size):
         """
         Combines multi parametric predictions into one group
-        :param ground_truth:
-        :param predictions:
-        :param unique_ID:
-        :param batch_size:
-        :return:
+        :param ground_truth: raw labels from sess.run
+        :param predictions: raw un-normalized logits
+        :param unique_ID: a unique identifier for each patient (not example)
+        :param batch_size: batch size
+        :return: recombined matrix, label array, logitz array
         """
 
         # Convert to numpy arrays
@@ -575,7 +674,7 @@ class SODTester():
             # add to the dictionary
             dic['avg'] = np.squeeze(avg)
 
-        return data, labba, logga
+        return data, np.squeeze(labba), np.squeeze(logga)
 
 
     def make_one_hot(self, n_classes, labels):
