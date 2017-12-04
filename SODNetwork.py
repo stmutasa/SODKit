@@ -898,12 +898,6 @@ class SODMatrix(object):
             # Add to the collection of weights
             tf.add_to_collection('weights', weights)
 
-            # Define the biases
-            bias = tf.get_variable('Bias', shape=[neurons], initializer=tf.constant_initializer(0.0))
-
-            # Add to the weights collection
-            tf.add_to_collection('biases', bias)
-
             # Do the math
             linear = tf.matmul(X, weights)
 
@@ -911,7 +905,16 @@ class SODMatrix(object):
             if BN: linear = self.batch_normalization(linear, phase_train, 'LinearNorm')
 
             # add biases
-            if add_bias: linear = tf.nn.bias_add(linear, bias)
+            if add_bias:
+
+                # Define the biases
+                bias = tf.get_variable('Bias', shape=[neurons], initializer=tf.constant_initializer(0.0))
+
+                # Add to the weights collection
+                tf.add_to_collection('biases', bias)
+
+                # Apply the biases
+                linear = tf.nn.bias_add(linear, bias)
 
             # relu for nonlinear linear layers. no relu for linear regressions
             if relu: linear = tf.nn.relu(linear, name=scope.name)
