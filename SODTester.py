@@ -400,22 +400,6 @@ class SODTester():
         :return:
         """
 
-        # if mon_sess:
-        #
-        #     # Define the file fullname of the freezed graph
-        #     output_graph = model_dir + "/frozen_model.pb"
-        #
-        #     # export the variables to constants
-        #     output_graph_def = tf.graph_util.convert_variables_to_constants(mon_sess, tf.get_default_graph().as_graph_def(), output_node_names.split(','))
-        #
-        #     # Serialize the output graph to the filesystem
-        #     with tf.gfile.GFile(output_graph, 'wb') as f:
-        #         f.write(output_graph_def.SerializeToString())
-        #
-        #     print("%d ops in the final graph." % len(output_graph_def.node))
-        #
-        #     return output_graph_def
-
         # graph_def = mon_sess.graph.as_graph_def()
         # for node in graph_def.node:
         #     if 'Softmax' in node.name: print(node)
@@ -425,14 +409,18 @@ class SODTester():
             # Retreive all the node names
             graph = mon_sess.graph
             node_names = [node.name for node in graph.as_graph_def().node]
+            #node_names = [node.name for node in graph.as_graph_def().node if 'Softmax' in node.name]
 
             # define frozen graph
-            frozen_graph_def = tf.graph_util.convert_variables_to_constants(mon_sess, tf.get_default_graph().as_graph_def(), node_names)
-            # frozen_graph_def = tf.graph_util.convert_variables_to_constants(mon_sess, tf.get_default_graph().as_graph_def(), ['Softmax/weights_1/tag'])
+            gd = mon_sess.graph.as_graph_def()
+            #frozen_graph_def = tf.graph_util.convert_variables_to_constants(mon_sess, gd, node_names)
+            frozen_graph_def = tf.graph_util.convert_variables_to_constants(mon_sess, gd ['Softmax/weights_1/tag'])
 
             # Write the frozen graph to disk
             with tf.gfile.GFile(model_dir+'frozen.pb', 'wb') as f:
                 f.write(frozen_graph_def.SerializeToString())
+
+            print("%d ops in the final graph." % len(frozen_graph_def.node))
 
             return frozen_graph_def
 
@@ -479,11 +467,25 @@ class SODTester():
             # Populate the object with the binary input
             graph_def.ParseFromString(f.read())
 
+        # Fix the batch norm nodes
+        for node in graph_def.node:
+            if node.op == 'RefSwitch':
+                node.op = 'Switch'
+                for index in range(len(node.input)):
+                    if 'moving_' in node.input[index]:
+                        node.input[index] = node.input[index] + '/read'
+            elif node.op == 'AssignSub':
+                node.op = 'Sub'
+                if 'use_locking' in node.attr: del node.attr['use_locking']
+            elif node.op == 'AssignAdd':
+                node.op = 'Add'
+                if 'use_locking' in node.attr: del node.attr['use_locking']
+
         # Now import the object into a new graph and return it
         with tf.Graph().as_default() as graph:
 
             # Import
-            tf.import_graph_def(graph_def, name='prefix')
+            tf.import_graph_def(graph_def)
 
         return graph
 

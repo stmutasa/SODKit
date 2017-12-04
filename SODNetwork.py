@@ -869,7 +869,7 @@ class SODMatrix(object):
 
 
     def linear_layer(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5,
-                     summary=True, BN=False, relu=True):
+                     summary=True, BN=False, relu=True, add_bias=True):
         """
         Wrapper for implementing a linear layer without or without relu/bn/dropout
         :param scope: internal name
@@ -881,6 +881,7 @@ class SODMatrix(object):
         :param summary: whether to output a summary
         :param BN: whether to use batch norm
         :param relu: whether to use a nonlinearity
+        :param add_bias: Whether to add a bias term here
         :return:
         """
 
@@ -910,7 +911,7 @@ class SODMatrix(object):
             if BN: linear = self.batch_normalization(linear, phase_train, 'LinearNorm')
 
             # add biases
-            linear = tf.nn.bias_add(linear, bias)
+            if add_bias: linear = tf.nn.bias_add(linear, bias)
 
             # relu for nonlinear linear layers. no relu for linear regressions
             if relu: linear = tf.nn.relu(linear, name=scope.name)
