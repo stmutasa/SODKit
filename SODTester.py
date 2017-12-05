@@ -408,13 +408,18 @@ class SODTester():
 
             # Retreive all the node names
             graph = mon_sess.graph
-            node_names = [node.name for node in graph.as_graph_def().node]
-            #node_names = [node.name for node in graph.as_graph_def().node if 'Softmax' in node.name]
+            # node_names = [node.name for node in graph.as_graph_def().node]
+
+            node_names = []
+            for node in graph.as_graph_def().node:
+                #if ('Softmax' in node.name) or ('Linear' in node.name) or ('Dense' in node.name) or ('Fc7' in node.name):
+                if 'Softmax' in node.name:
+                    node_names.append(node.name)
 
             # define frozen graph
             gd = mon_sess.graph.as_graph_def()
-            #frozen_graph_def = tf.graph_util.convert_variables_to_constants(mon_sess, gd, node_names)
-            frozen_graph_def = tf.graph_util.convert_variables_to_constants(mon_sess, gd ['Softmax/weights_1/tag'])
+            frozen_graph_def = tf.graph_util.convert_variables_to_constants(mon_sess, gd, node_names)
+            #frozen_graph_def = tf.graph_util.convert_variables_to_constants(mon_sess, gd, ['Softmax/weights_1/tag'])
 
             # Write the frozen graph to disk
             with tf.gfile.GFile(model_dir+'frozen.pb', 'wb') as f:
