@@ -26,7 +26,7 @@ class SODMatrix(object):
 
 
     def convolution(self, scope, X, F, K, S=2, padding='SAME', phase_train=None,
-                    summary=True, BN=True, relu=True, downsample=False):
+                    summary=True, BN=True, relu=True, downsample=False, bias=True):
         """
         This is a wrapper for convolutions
         :param scope:
@@ -40,6 +40,7 @@ class SODMatrix(object):
         :param BN: whether to perform batch normalization
         :param relu: bool, whether to do the activation function at the end
         :param downsample: whether to perform a max/avg downsampling at the end
+        :param bias: whether to include a bias term
         :return:
         """
 
@@ -56,12 +57,8 @@ class SODMatrix(object):
             kernel = tf.get_variable('Weights', shape=[F, F, C, K],
                                      initializer=tf.contrib.layers.variance_scaling_initializer())
 
-            # Define the biases
-            bias = tf.get_variable('Bias', shape=[K], initializer=tf.constant_initializer(0.0))
-
             # Add to the weights collection
             tf.add_to_collection('weights', kernel)
-            tf.add_to_collection('biases', bias)
 
             # Perform the actual convolution
             conv = tf.nn.conv2d(X, kernel, [1, S, S, 1], padding=padding)
@@ -70,7 +67,10 @@ class SODMatrix(object):
             if BN: conv = self.batch_normalization(conv, phase_train, scope)
 
             # Add in the bias
-            conv = tf.nn.bias_add(conv, bias)
+            if bias:
+                bias = tf.get_variable('Bias', shape=[K], initializer=tf.constant_initializer(0.0))
+                tf.add_to_collection('biases', bias)
+                conv = tf.nn.bias_add(conv, bias)
 
             # Relu activation
             if relu: conv = tf.nn.relu(conv, name=scope.name)
