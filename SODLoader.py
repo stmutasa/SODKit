@@ -753,8 +753,8 @@ class SODLoader():
     def zoom_3D(self, volume, factor):
         """
         Uses scipy to zoom a 3D volume to a new shape
-        :param volume: 
-        :param factor: 
+        :param volume: The input volume, numpy array
+        :param factor: The rescale factor: an array corresponding to each axis to rescale
         :return: 
         """
 
@@ -1810,11 +1810,11 @@ class SODLoader():
         # get total pixel count
         tot_pixels = input.shape[0] * input.shape[1]
 
-        # Convert image to grayscale
-        gray_image = cv2.cvtColor(input, cv2.COLOR_BGR2GRAY)
+        # Convert image to grayscale if not already
+        if depth==3: input = cv2.cvtColor(input, cv2.COLOR_BGR2GRAY)
 
         # Count the fraction of pixels that arent 0
-        non_zero = np.sum(gray_image.astype(np.bool)) / tot_pixels
+        non_zero = np.sum(input.astype(np.bool)) / tot_pixels
 
         return non_zero
 
