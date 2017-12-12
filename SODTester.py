@@ -164,7 +164,7 @@ class SODTester():
             print('Patient %s Preds: %s' % (step, logit[:to_print]))
 
 
-    def calc_multiclass_square_metrics(self, logits, labels, Epoch, n_classes):
+    def calc_multiclass_square_metrics(self, logits, labels, n_classes):
         """
         Calculates and displays SN and specificity of multiclass labels.
         :param logits:
