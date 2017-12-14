@@ -167,8 +167,8 @@ class SODTester():
     def calc_multiclass_square_metrics(self, logits, labels, n_classes):
         """
         Calculates and displays SN and specificity of multiclass labels.
-        :param logits:
-        :param labels:
+        :param logits: raw logits from TF output
+        :param labels: raw labels
         :param Epoch:
         :param n_classes:
         :return:
