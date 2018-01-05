@@ -457,10 +457,12 @@ class SODLoader():
         return voxelCoord
 
 
-    def create_breast_mask(self, image):
+    def create_breast_mask(self, image, threshold=15, size_denominator=45):
         """
         Creates a rough mask of breast tissue returned as 1 = breast 0 = nothing
-        :param image: 
+        :param image: the input volume (3D numpy array)
+        :param threshold: what value to threshold the mask
+        :param size_denominator: The bigger this is the smaller the structuring element
         :return: mask: the mask volume
         """
 
@@ -475,10 +477,10 @@ class SODLoader():
             # mask[k] = cv2.bilateralFilter(mask[k].astype(np.float32),9,75,75)
 
             # Threshold the image
-            mask[k] = np.squeeze(mask[k] < 15)
+            mask[k] = np.squeeze(mask[k] < threshold)
 
             # Define the CV2 structuring element
-            radius_close = np.round(mask.shape[1] / 45).astype('int16')
+            radius_close = np.round(mask.shape[1] / size_denominator).astype('int16')
             kernel_close = cv2.getStructuringElement(shape=cv2.MORPH_ELLIPSE, ksize=(radius_close, radius_close))
 
             # Apply morph close
