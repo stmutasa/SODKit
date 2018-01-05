@@ -1382,12 +1382,12 @@ class SODLoader():
 
 
     def display_volume(self, volume, plot=False):
-        self.remove_keymap_conflicts({'j', 'k'})
+        #self.remove_keymap_conflicts({'j', 'k'})
         fig, ax = plt.subplots()
         ax.volume = volume
         ax.index = volume.shape[0] // 2
         ax.imshow(volume[ax.index], cmap='gray')
-        fig.canvas.mpl_connect('key_press_event', self.process_key)
+        fig.canvas.mpl_connect('scroll_event', self.process_key)
         if plot: plt.show()
 
 
@@ -1772,9 +1772,9 @@ class SODLoader():
     def process_key(self, event):
         fig = event.canvas.figure
         ax = fig.axes[0]
-        if event.key == 'j':
+        if event.button == 'down':
             self.previous_slice(ax)
-        elif event.key == 'k':
+        elif event.button == 'up':
             self.next_slice(ax)
         fig.canvas.draw()
 
