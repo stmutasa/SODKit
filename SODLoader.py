@@ -323,13 +323,11 @@ class SODLoader():
         features = tf.parse_single_example(serialized_example, features=feature_dict)
 
         # Make a data dictionary and cast it to floats
-        data = {}
+        data = {'id': tf.cast(features['id'], tf.float32)}
         for key, value in loaded_dict.items():
 
             # Depending on the type key or entry value, use a different cast function on the feature
-            if key == 'id': data[key] = tf.cast(features[key], tf.float32)
-
-            elif 'data' in key:
+            if 'data' in key:
                 print('This is the data tensor')
                 data[key] = tf.decode_raw(features[key], image_dtype)
                 data[key] = tf.reshape(data[key], shape=[box_dims, box_dims, 1])
