@@ -328,7 +328,6 @@ class SODLoader():
 
             # Depending on the type key or entry value, use a different cast function on the feature
             if 'data' in key:
-                print('This is the data tensor')
                 data[key] = tf.decode_raw(features[key], image_dtype)
                 data[key] = tf.reshape(data[key], shape=[box_dims, box_dims, 1])
                 data[key] = tf.cast(data[key], tf.float32)
