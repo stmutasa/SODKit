@@ -1,5 +1,5 @@
 """
-SOD Loader is the class for loading various file types including: JPegs Nifty and DICOM into numpy arrays.
+SOD Loader is the class for loading and preprocessing various file types including: JPegs Nifty and DICOM into numpy arrays.
 
 There are also functions to preprocess the data including: segmenting lungs, generating cubes, and creating MIPs
 
@@ -7,7 +7,7 @@ It then contains functions to store the file as a protocol buffer
 
 """
 
-import glob, os, dicom, csv, random, cv2, math
+import glob, os, dicom, csv, random, cv2, math, pickle
 
 import numpy as np
 import nibabel as nib
@@ -251,6 +251,48 @@ class SODLoader():
             return_dict[key] = row
 
         return return_dict
+
+
+    def save_dict_pickle(self, dictionary, data_root='data/filetypes'):
+
+        """
+        Saves a dictionary to pickle. Good for saving data types
+        :param dictionary: the dictionary to save
+        :param data_root: the name of the file. "pickle.p" will be added
+        :return:
+        """
+
+        filename = data_root + '_pickle.p'
+        pickle._dump(dictionary, open(filename, 'wb'))
+
+
+    def load_dict_pickle(self, filename='data/filetypes_pickle.p'):
+
+        """
+        This loads the dictionary from pickle
+        :param filename: the save file
+        :return: the loaded dictionary
+        """
+        return pickle.load(open(filename, 'rb'))
+
+
+    def save_filetypes(self, dict_index_0, data_root='data/filetypes'):
+
+        """
+        Function to save the loaded dictionary filetypes into a pickle file
+        :param dict_index_0: the first entry of the data dictionary
+        :param data_root: the first part of the filename
+        :return:
+        """
+
+        pickle_dic = {}
+        for key, val in dict_index_0.items():
+
+            # Generate the type dictionary
+            pickle_dic[key] = str(type(val))[8:-2]
+
+            # Save the dictionary
+            self.save_dict_pickle(pickle_dic, data_root)
 
 
     def load_NIFTY(self, path, reshape=True):
