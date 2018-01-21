@@ -906,52 +906,66 @@ class SODLoader():
         return np.subtract(image, img_min), angle, [sy, sx]
 
 
-    def calc_fast_affine(self, center=[], angle_range=[]):
+    def calc_fast_affine(self, center=[], angle_range=[], dim_3d=True):
 
         """
         This function returns 3 matrices that define affine rotations in 3D
         :param center: The center of the rotation
         :param angle_range: matrix describing range of rotation along z, y, x in degrees
+        :param dim_3d: Whether this is 2 dimensional or 3D
         :return: array with the affine matrices
         """
 
-        # Define the affine angles of rotation
-        anglex = random.randrange(-angle_range[2], angle_range[2])
-        angley = random.randrange(-angle_range[1], angle_range[1])
-        anglez = random.randrange(-angle_range[0], angle_range[0])
+        # First do 2D rotations
+        if not dim_3d:
+            angle = random.randrange(-angle_range, angle_range)
+            M = cv2.getRotationMatrix2D(tuple(center), angle, 1)
+            return M
 
-        # Matrix to rotate along Coronal plane (Y columns, Z rows)
-        Mx = cv2.getRotationMatrix2D((center[1], center[0]), anglex, 1)
+        else:
 
-        # Matrix to rotate along saggital plane (Z and X) and apply
-        My = cv2.getRotationMatrix2D((center[2], center[0]), angley, 1)
+            # Define the affine angles of rotation
+            anglex = random.randrange(-angle_range[2], angle_range[2])
+            angley = random.randrange(-angle_range[1], angle_range[1])
+            anglez = random.randrange(-angle_range[0], angle_range[0])
 
-        # Matrix to rotate along Axial plane (X and Y)
-        Mz = cv2.getRotationMatrix2D((center[1], center[2]), anglez, 1)
+            # Matrix to rotate along Coronal plane (Y columns, Z rows)
+            Mx = cv2.getRotationMatrix2D((center[1], center[0]), anglex, 1)
 
-        return [Mx, My, Mz]
+            # Matrix to rotate along saggital plane (Z and X) and apply
+            My = cv2.getRotationMatrix2D((center[2], center[0]), angley, 1)
+
+            # Matrix to rotate along Axial plane (X and Y)
+            Mz = cv2.getRotationMatrix2D((center[1], center[2]), anglez, 1)
+
+            return [Mx, My, Mz]
 
 
-    def perform_fast_affine(self, image, M=[]):
+    def perform_fast_affine(self, image, M=[], dim_3d=True):
 
         """
         This function applies an affine transform using the given affine matrices
         :param image: input volume
         :param M: Affine matrices along x, y and z
-        :return: image
+        :param dim_3d: whether this is 3D or 2D
+        :return: image after warp
         """
 
         # The image is sent in Z,Y,X format
-        Z, Y, X = image.shape
+        if dim_3d: Z, Y, X = image.shape
+        else: Y, X = image.shape
 
         # OpenCV makes interpolated pixels equal 0. Add the minumum value to subtract it later
         img_min = abs(image.min())
         image = np.add(image, img_min)
 
         # Apply the Affine transforms slice by slice
-        for i in range(0, X): image[:, :, i] = cv2.warpAffine(image[:, :, i], M[0], (Y, Z))
-        for i in range(0, Y): image[:, i, :] = cv2.warpAffine(image[:, i, :], M[1], (X, Z))
-        for i in range(0, Z): image[i, :, :] = cv2.warpAffine(image[i, :, :], M[2], (Y, X))
+        if dim_3d:
+            for i in range(0, X): image[:, :, i] = cv2.warpAffine(image[:, :, i], M[0], (Y, Z))
+            for i in range(0, Y): image[:, i, :] = cv2.warpAffine(image[:, i, :], M[1], (X, Z))
+            for i in range(0, Z): image[i, :, :] = cv2.warpAffine(image[i, :, :], M[2], (Y, X))
+
+        else: image = cv2.warpAffine(image, M, (Y, X))
 
         # Return the array with normal houndsfield distribution
         return np.subtract(image, img_min)
