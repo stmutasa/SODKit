@@ -276,7 +276,7 @@ class SODLoader():
         return pickle.load(open(filename, 'rb'))
 
 
-    def save_filetypes(self, dict_index_0, data_root='data/filetypes'):
+    def save_dict_filetypes(self, dict_index_0, data_root='data/filetypes'):
 
         """
         Function to save the loaded dictionary filetypes into a pickle file
@@ -293,6 +293,52 @@ class SODLoader():
 
             # Save the dictionary
             self.save_dict_pickle(pickle_dic, data_root)
+
+
+    def load_tfrecords(self, filenames, box_dims, image_dtype=tf.float32):
+
+        """
+        Function to load a tfrecord protobuf. numpy arrays (volumes) should have 'data' in them.
+        Currently supports strings, floats, ints, and arrays
+        :param filenames: the list of filenames for the filename queue
+        :param box_dims: the dimensions of the image saved
+        :param image_dtype: the data type of the image. i.e. tf.float32
+        :return: data: dictionary with all the loaded tensors
+        """
+
+        # now load the remaining files
+        filename_queue = tf.train.string_input_producer(filenames, num_epochs=None)
+
+        reader = tf.TFRecordReader()  # Instantializes a TFRecordReader which outputs records from a TFRecords file
+        _, serialized_example = reader.read(filename_queue)  # Returns the next record (key:value) produced by the reader
+
+        # Pickle load
+        loaded_dict = self.load_dict_pickle()
+
+        # Populate the feature dict
+        feature_dict = {'id': tf.FixedLenFeature([], tf.int64)}
+        for key, value in loaded_dict.items(): feature_dict[key] = tf.FixedLenFeature([], tf.string)
+
+        # Parses one protocol buffer file into the features dictionary which maps keys to tensors with the data: 'key': parse_single_eg
+        features = tf.parse_single_example(serialized_example, features=feature_dict)
+
+        # Make a data dictionary and cast it to floats
+        data = {}
+        for key, value in loaded_dict.items():
+
+            # Depending on the type key or entry value, use a different cast function on the feature
+            if key == 'id': data[key] = tf.cast(features[key], tf.float32)
+
+            elif 'data' in key:
+                print('This is the data tensor')
+                data[key] = tf.decode_raw(features[key], image_dtype)
+                data[key] = tf.reshape(data[key], shape=[box_dims, box_dims, 1])
+                data[key] = tf.cast(data[key], tf.float32)
+
+            elif 'str' in value: data[key] = tf.cast(features[key], tf.string)
+            else: data[key] = tf.string_to_number(features[key], tf.float32)
+
+        return data
 
 
     def load_NIFTY(self, path, reshape=True):
