@@ -17,7 +17,10 @@ class SODMatrix(object):
     # Define training or testing phase
     training_phase = None
 
-    def __init__(self):
+    def __init__(self, summary=True, phase_train=True):
+
+        self.summary=summary
+        self.phase_train=phase_train
 
         pass
 
@@ -25,7 +28,7 @@ class SODMatrix(object):
     # *************** Convolution wrappers ***************
 
 
-    def convolution(self, scope, X, F, K, S=2, padding='SAME', phase_train=None, summary=True, BN=True, relu=True, downsample=False, bias=True, dropout=None):
+    def convolution(self, scope, X, F, K, S=2, padding='SAME', phase_train=None, BN=True, relu=True, downsample=False, bias=True, dropout=None):
         """
         This is a wrapper for convolutions
         :param scope:
@@ -35,7 +38,6 @@ class SODMatrix(object):
         :param S: Stride
         :param padding: 'SAME' or 'VALID'
         :param phase_train: For batch norm implementation
-        :param summary: whether to produce a tensorboard summary of this layer
         :param BN: whether to perform batch normalization
         :param relu: bool, whether to do the activation function at the end
         :param downsample: whether to perform a max/avg downsampling at the end
@@ -64,9 +66,6 @@ class SODMatrix(object):
             # Perform the actual convolution
             conv = tf.nn.conv2d(X, kernel, [1, S, S, 1], padding=padding)
 
-            # Apply the batch normalization. Updates weights during training phase only
-            if BN: conv = self.batch_normalization(conv, phase_train, scope)
-
             # Add in the bias
             if bias:
                 bias = tf.get_variable('Bias', shape=[K], initializer=tf.constant_initializer(0.0))
@@ -76,19 +75,22 @@ class SODMatrix(object):
             # Relu activation
             if relu: conv = tf.nn.relu(conv, name=scope.name)
 
-            # Dropout
+            # Apply the batch normalization. Updates weights during training phase only
+            if BN: conv = self.batch_normalization(conv, phase_train, scope)
+
+            # Channel wise dropout
             if dropout and phase_train==True: conv = tf.nn.dropout(conv, dropout, noise_shape=[B, 1, 1, C])
 
             # If requested, use the avg + max pool downsample operation
             if downsample: conv = self.incepted_downsample(conv)
 
             # Create a histogram/scalar summary of the conv1 layer
-            if summary: self._activation_summary(conv)
+            if self.summary: self._activation_summary(conv)
 
             return conv
 
 
-    def convolution_3d(self, scope, X, F, K, S=2, padding='SAME', phase_train=None, summary=True, BN=True, relu=True, downsample=False, dropout=None):
+    def convolution_3d(self, scope, X, F, K, S=2, padding='SAME', phase_train=None, BN=True, relu=True, downsample=False, dropout=None):
         """
         This is a wrapper for 3-dimensional convolutions
         :param scope:
@@ -98,7 +100,6 @@ class SODMatrix(object):
         :param S: Stride
         :param padding: 'SAME' or 'VALID'
         :param phase_train: For batch norm implementation
-        :param summary: whether to produce a tensorboard summary of this layer
         :param BN: whether to perform batch normalization
         :param relu: Whether to perform relu
         :param downsample: Whether to perform a max+avg pool downsample
@@ -149,12 +150,12 @@ class SODMatrix(object):
             if downsample: conv = self.incepted_downsample_3d(conv)
 
             # Create a histogram/scalar summary of the conv1 layer
-            if summary: self._activation_summary(conv)
+            if self.summary: self._activation_summary(conv)
 
             return conv
 
 
-    def depthwise_convolution(self, scope, X, F, K, S=2, padding='SAME', phase_train=None, summary=True, BN=True, relu=True):
+    def depthwise_convolution(self, scope, X, F, K, S=2, padding='SAME', phase_train=None, BN=True, relu=True):
             """
             This is a wrapper for depthwise convolutions
             :param scope:
@@ -164,7 +165,6 @@ class SODMatrix(object):
             :param S: Stride
             :param padding: 'SAME' or 'VALID'
             :param phase_train: For batch norm implementation
-            :param summary: whether to produce a tensorboard summary of this layer
             :param BN: whether to perform batch normalization
             :return: conv: the result of everything
             """
@@ -199,13 +199,13 @@ class SODMatrix(object):
                 if relu: conv = tf.nn.relu(conv, name=scope.name)
 
                 # Create a histogram/scalar summary of the conv1 layer
-                if summary: self._activation_summary(conv)
+                if self.summary: self._activation_summary(conv)
 
                 return conv
 
 
     def deconvolution(self, scope, X, F, K, S, padding='SAME', phase_train=None, concat=True,
-                      concat_var=None, out_shape=None, summary=True, BN=True, relu=True):
+                      concat_var=None, out_shape=None, BN=True, relu=True):
         """
         This is a wrapper for De-convolutions aka fractionally strided convolutions aka transposed convolutions
         aka upconvolutions aka backwards convolutions
@@ -218,7 +218,6 @@ class SODMatrix(object):
         :param phase_train: Whether we are in training or testing mode
         :param concat: Whether to concatenate or add
         :param concat_var: The variable aka "skip connection" to concatenate
-        :param summary: whether to produce a tensorboard summary of this layer
         :param BN: whether to perform batch normalization
         :param out_shape: The shape of output. if blank just double
         :return: conv: the result of the convolution
@@ -266,13 +265,13 @@ class SODMatrix(object):
             if relu: conv = tf.nn.relu(conv, name=scope.name)
 
             # Create a histogram summary and summary of sparsity
-            if summary: self._activation_summary(conv)
+            if self.summary: self._activation_summary(conv)
 
             return conv
 
 
     def deconvolution_3d(self, scope, X, F, K, S, padding='SAME', phase_train=None, concat=True,
-                      concat_var=None, out_shape=None, summary=True, BN=True, relu=True):
+                      concat_var=None, out_shape=None, BN=True, relu=True):
         """
         This is a wrapper for 3D De-convolutions aka fractionally strided convolutions aka transposed convolutions
         aka upconvolutions aka backwards convolutions
@@ -285,7 +284,6 @@ class SODMatrix(object):
         :param phase_train: Whether we are in training or testing mode
         :param concat: whether to concatenate skip connection or use a residual connection
         :param concat_var: The variable aka "skip connection" to concatenate
-        :param summary: whether to produce a tensorboard summary of this layer
         :param BN: whether to perform batch normalization
         :param out_shape: The shape of output. if blank just double
         :return: conv: the result of the convolution
@@ -332,12 +330,12 @@ class SODMatrix(object):
             if relu: conv = tf.nn.relu(conv, name=scope.name)
 
             # Create a histogram summary and summary of sparsity
-            if summary: self._activation_summary(conv)
+            if self.summary: self._activation_summary(conv)
 
             return conv
 
 
-    def inception_layer(self, scope, X, K, S=1, padding='SAME', phase_train=None, summary=True, BN=True, relu=True, dropout=None):
+    def inception_layer(self, scope, X, K, S=1, padding='SAME', phase_train=None, BN=True, relu=True, dropout=None):
         """
         This function implements an inception layer or "network within a network"
         :param scope:
@@ -346,7 +344,6 @@ class SODMatrix(object):
         :param S: Stride
         :param padding:
         :param phase_train: For batch norm implementation
-        :param summary: whether to produce a tensorboard summary of this layer
         :param BN: whether to perform batch normalization
         :param dropout: keep probability for applying channel wise dropout
         :return: the inception layer output after concat
@@ -368,27 +365,22 @@ class SODMatrix(object):
         with tf.variable_scope(scope) as scope:
 
             # First branch, 1x1x64 convolution
-            inception1 = self.convolution('Inception1', X, 1, K, S,
-                                          phase_train=phase_train, summary=summary, BN=BN, relu=relu)  # 64x64x64
+            inception1 = self.convolution('Inception1', X, 1, K, S, phase_train=phase_train,  BN=BN, relu=relu)
 
             # Second branch, 1x1 convolution then 3x3 convolution
-            inception2a = self.convolution('Inception2a', X, 1, K, S, phase_train=phase_train, summary=summary)  # 64x64x1
+            inception2a = self.convolution('Inception2a', X, 1, K, S, phase_train=phase_train)
 
-            inception2 = self.convolution('Inception2', inception2a, 3, K, 1,
-                                          phase_train=phase_train, summary=summary, BN=BN, relu=relu)  # 64x64x64
+            inception2 = self.convolution('Inception2', inception2a, 3, K, 1, phase_train=phase_train, BN=BN, relu=relu)
 
             # Third branch, 1x1 convolution then 5x5 convolution:
-            inception3a = self.convolution('Inception3a', X, 1, K, S,
-                                           phase_train=phase_train, summary=summary)  # 64x64x1
+            inception3a = self.convolution('Inception3a', X, 1, K, S, phase_train=phase_train)
 
-            inception3 = self.convolution('Inception3', inception3a, 5, K, 1,
-                                          phase_train=phase_train, summary=summary, BN=BN, relu=relu)  # 64x64x64
+            inception3 = self.convolution('Inception3', inception3a, 5, K, 1, phase_train=phase_train, BN=BN, relu=relu)
 
             # Fourth branch, max pool then 1x1 conv:
-            inception4a = tf.nn.max_pool(X, [1, 3, 3, 1], [1, 1, 1, 1], padding)  # 64x64x256
+            inception4a = tf.nn.max_pool(X, [1, 3, 3, 1], [1, 1, 1, 1], padding)
 
-            inception4 = self.convolution('Inception4', inception4a, 1, K, S,
-                                          phase_train=phase_train, summary=summary, BN=BN, relu=relu)  # 64x64x64
+            inception4 = self.convolution('Inception4', inception4a, 1, K, S, phase_train=phase_train, BN=BN, relu=relu)
 
             # Concatenate the results for dimension of 64,64,256
             inception = tf.concat([inception1, inception2, inception3, inception4], axis=-1)
@@ -408,7 +400,7 @@ class SODMatrix(object):
             return inception
 
 
-    def inception_layer_3d(self, scope, X, K, Fz=1, S=1, padding='SAME', phase_train=None, summary=True, BN=True, relu=True, dropout=None):
+    def inception_layer_3d(self, scope, X, K, Fz=1, S=1, padding='SAME', phase_train=None, BN=True, relu=True, dropout=None):
         """
         This function implements a 3D inception layer or "network within a network"
         :param scope:
@@ -418,7 +410,6 @@ class SODMatrix(object):
         :param S: Stride
         :param padding:
         :param phase_train: For batch norm implementation
-        :param summary: whether to produce a tensorboard summary of this layer
         :param BN: whether to perform batch normalization
         :param dropout: keep prob for applying channel wise dropout
         :return: the inception layer output after concat
@@ -441,27 +432,27 @@ class SODMatrix(object):
 
             # First branch, 1x1x64 convolution
             inception1 = self.convolution_3d('Inception1', X, [Fz, 1, 1], K, S,
-                                          phase_train=phase_train, summary=summary, BN=BN, relu=relu)
+                                          phase_train=phase_train, BN=BN, relu=relu)
 
             # Second branch, 1x1 convolution then 3x3 convolution
             inception2a = self.convolution_3d('Inception2a', X, [Fz, 1, 1], K, S,
-                                           phase_train=phase_train, summary=summary)
+                                           phase_train=phase_train)
 
             inception2 = self.convolution_3d('Inception2', inception2a, [1, 3, 3], K, 1,
-                                          phase_train=phase_train, summary=summary, BN=BN, relu=relu)
+                                          phase_train=phase_train, BN=BN, relu=relu)
 
             # Third branch, 1x1 convolution then 5x5 convolution:
             inception3a = self.convolution_3d('Inception3a', X, [Fz, 1, 1], K, S,
-                                           phase_train=phase_train, summary=summary)
+                                           phase_train=phase_train)
 
             inception3 = self.convolution_3d('Inception3', inception3a, [1, 5, 5], K, 1,
-                                          phase_train=phase_train, summary=summary, BN=BN, relu=relu)
+                                          phase_train=phase_train, BN=BN, relu=relu)
 
             # Fourth branch, max pool then 1x1 conv:
             inception4a = tf.nn.max_pool3d(X, [1, Fz, 3, 3, 1], [1, 1, 1, 1, 1], padding)
 
             inception4 = self.convolution_3d('Inception4', inception4a, 1, K, S,
-                                          phase_train=phase_train, summary=summary, BN=BN, relu=relu)
+                                          phase_train=phase_train, BN=BN, relu=relu)
 
             # Concatenate the results
             inception = tf.concat([inception1, inception2, inception3, inception4], axis=-1)
@@ -480,7 +471,7 @@ class SODMatrix(object):
             return inception
 
 
-    def residual_layer(self, scope, X, F, K, S=2, K_prob=None, padding='SAME', phase_train=None, summary=True, DSC=False, BN=False, relu=False, dropout=None):
+    def residual_layer_stanford(self, scope, X, F, K, S=2, K_prob=None, padding='SAME', phase_train=None, DSC=False, BN=False, relu=False, dropout=None):
         """
         This is a wrapper for implementing a stanford style residual layer
         :param scope:
@@ -491,7 +482,6 @@ class SODMatrix(object):
         :param k_prob: keep probability for dropout
         :param padding: SAME or VALID
         :param phase_train: For batch norm implementation
-        :param summary: whether to produce a tensorboard summary of this layer
         :param DSC: Whether to perform standard downsample or incepted downsample
         :param BN: Whether to batch norm. Defaults to false to plug into another residual
         :param relu: whether to apply a nonlinearity at the end.
@@ -512,14 +502,14 @@ class SODMatrix(object):
             if K_prob: conv1 = tf.nn.dropout(conv1, K_prob)
 
             # Another Convolution with BN and ReLu
-            conv2 = self.convolution('Conv2', conv1, F, K, 1, padding, phase_train, summary, True, True)
+            conv2 = self.convolution('Conv2', conv1, F, K, 1, padding, phase_train, True, True)
 
             # Second dropout
             if K_prob: conv2 = tf.nn.dropout(conv2, K_prob)
 
             # Final downsampled conv without BN or RELU
-            if DSC: conv = self.convolution('ConvFinal', conv2, F, K, 1, padding, phase_train, summary, False, False, True)
-            else: conv = self.convolution('ConvFinal', conv2, F, K*S, S, padding, phase_train, summary, False, False)
+            if DSC: conv = self.convolution('ConvFinal', conv2, F, K, 1, padding, phase_train, False, False, True)
+            else: conv = self.convolution('ConvFinal', conv2, F, K*S, S, padding, phase_train, False, False)
 
             # Downsample the residual input if we did the conv layer. pool or strided
             if DSC: X = self.incepted_downsample(X)
@@ -544,8 +534,133 @@ class SODMatrix(object):
             return residual
 
 
+    def residual_layer(self, scope, residual, F, K, S=2, padding='SAME', phase_train=None, dropout=None):
+
+        """
+        This is a wrapper for implementing a microsoft style residual layer
+        :param scope:
+        :param residual: Output of the previous layer
+        :param F: Dimensions of the second convolution in F(x) - the non inception layer one
+        :param K: Feature maps in the inception layer (will be multiplied by 4 during concatenation)
+        :param S: Stride of the convolution, whether to downsample
+        :param padding: SAME or VALID
+        :param phase_train: For batch norm implementation
+        :param dropout: keep prob for applying channel wise dropout
+        :return:
+        """
+
+        # Set the scope. Implement a residual layer below
+        with tf.variable_scope(scope) as scope:
+
+            # First Convolution with BN and ReLU
+            conv = self.convolution('Conv1', residual, F, K, S, padding, phase_train, True, True)
+
+            # Second convolution without ReLU
+            conv = self.convolution('Conv2', conv, F, K, 1, padding, phase_train, True, False)
+
+            # Downsample the residual input using strided 1x1 conv
+            if S>1: residual = self.convolution('Res_down', residual, 1, K, S, padding, phase_train, True, False)
+
+            # Add the Residual
+            conv = tf.add(conv, residual)
+            conv = tf.nn.relu(conv, name=scope.name)
+
+            # Get dimensions
+            C = conv.get_shape().as_list()[-1]
+            B = conv.get_shape().as_list()[0]
+
+            # Apply channel wise dropout here
+            if dropout and phase_train == True: conv = tf.nn.dropout(conv, dropout, noise_shape=[B, 1, 1, C])
+
+            return conv
+
+
+    def residual_bottleneck_layer(self, scope, residual, F, K, S=2, padding='SAME', phase_train=None, dropout=None):
+
+        """
+        This is a wrapper for implementing a microsoft style residual layer with bottlenecks for deep networks
+        :param scope:
+        :param residual: Output of the previous layer
+        :param F: Dimensions of the second convolution in F(x) - the non inception layer one
+        :param K: Feature maps in the inception layer (will be multiplied by 4 during concatenation)
+        :param S: Stride of the convolution, whether to downsample
+        :param padding: SAME or VALID
+        :param phase_train: For batch norm implementation
+        :param dropout: keep prob for applying channel wise dropout
+        :return:
+        """
+
+        # Set the scope. Implement a residual layer below
+        with tf.variable_scope(scope) as scope:
+
+            # First Convolution with BN and ReLU
+            conv = self.convolution('Conv1', residual, 1, int(K/4), S, padding, phase_train, True, True)
+
+            # Second convolution with BN and ReLU
+            conv = self.convolution('Conv2', conv, F, int(K/4), 1, padding, phase_train, True, True)
+
+            # Third layer without ReLU
+            conv = self.convolution('Conv3', conv, 1, K, 1, padding, phase_train, True, False)
+
+            # Downsample the residual input using strided 1x1 conv
+            if S > 1: residual = self.convolution('Res_down', residual, 1, K, S, padding, phase_train, True, False)
+
+            # Add the Residual
+            conv = tf.add(conv, residual)
+            conv = tf.nn.relu(conv, name=scope.name)
+
+            # Get dimensions
+            C = conv.get_shape().as_list()[-1]
+            B = conv.get_shape().as_list()[0]
+
+            # Apply channel wise dropout here
+            if dropout and phase_train == True: conv = tf.nn.dropout(conv, dropout, noise_shape=[B, 1, 1, C])
+
+            return conv
+
+
+    def wide_residual_layer(self, scope, residual, K, S=2, padding='SAME', phase_train=None, dropout=None):
+
+        """
+        This is a wrapper for implementing a residual layer with inception layers
+        :param scope:
+        :param residual: Output of the previous layer
+        :param K: Feature maps in the inception layer (will be multiplied by 4 during concatenation)
+        :param S: Stride of the convolution, whether to downsample
+        :param padding: SAME or VALID
+        :param phase_train: For batch norm implementation
+        :param dropout: keep prob for applying channel wise dropout
+        :return:
+        """
+
+        # Set the scope. Implement a residual layer below
+        with tf.variable_scope(scope) as scope:
+
+            # First Convolution with BN and ReLU
+            conv = self.inception_layer('Conv1', residual, K, S, padding, phase_train, True, True)
+
+            # Second convolution without ReLU
+            conv = self.inception_layer('Conv2', conv, K, 1, padding, phase_train, True, False)
+
+            # Downsample the residual input using strided 1x1 conv
+            if S > 1: residual = self.convolution('Res_down', residual, 1, K, S, padding, phase_train, True, False)
+
+            # Add the Residual
+            conv = tf.add(conv, residual)
+            conv = tf.nn.relu(conv, name=scope.name)
+
+            # Get dimensions
+            C = conv.get_shape().as_list()[-1]
+            B = conv.get_shape().as_list()[0]
+
+            # Apply channel wise dropout here
+            if dropout and phase_train == True: conv = tf.nn.dropout(conv, dropout, noise_shape=[B, 1, 1, C])
+
+            return conv
+
+
     def residual_layer_3d(self, scope, X, F, K, S=2, K_prob=None, padding='SAME',
-                       phase_train=None, summary=True, DSC=False, BN=False, relu=False, dropout=None):
+                       phase_train=None, DSC=False, BN=False, relu=False, dropout=None):
         """
         This is a wrapper for implementing a stanford style residual layer in 3 dimensions
         :param scope:
@@ -556,7 +671,6 @@ class SODMatrix(object):
         :param k_prob: keep probability for dropout
         :param padding: SAME or VALID
         :param phase_train: For batch norm implementation
-        :param summary: whether to produce a tensorboard summary of this layer
         :param DSC: Whether to perform standard downsample or incepted downsample
         :param BN: Whether to batch norm. Defaults to false to plug into another residual
         :param relu: whether to apply a nonlinearity at the end.
@@ -577,14 +691,14 @@ class SODMatrix(object):
             if K_prob: conv1 = tf.nn.dropout(conv1, K_prob)
 
             # Another Convolution with BN and ReLu
-            conv2 = self.convolution_3d('Conv2', conv1, F, K, 1, padding, phase_train, summary, True, True)
+            conv2 = self.convolution_3d('Conv2', conv1, F, K, 1, padding, phase_train, True, True)
 
             # Second dropout
             if K_prob: conv2 = tf.nn.dropout(conv2, K_prob)
 
             # Final downsampled conv without BN or RELU
-            if DSC: conv = self.convolution_3d('ConvFinal', conv2, F, K, 1, padding, phase_train, summary, False, False, True)
-            else: conv = self.convolution_3d('ConvFinal', conv2, F, K*S, S, padding, phase_train, summary, False, False)
+            if DSC: conv = self.convolution_3d('ConvFinal', conv2, F, K, 1, padding, phase_train, False, False, True)
+            else: conv = self.convolution_3d('ConvFinal', conv2, F, K*S, S, padding, phase_train, False, False)
 
             # Downsample the residual input if we did the conv layer. pool or strided
             if DSC: X = self.incepted_downsample_3d(X)
@@ -610,7 +724,7 @@ class SODMatrix(object):
 
 
     def res_inc_layer(self, scope, X, K, S=2, K_prob=None, padding='SAME',
-                       phase_train=None, summary=True, DSC=False, BN=False, relu=False):
+                       phase_train=None, DSC=False, BN=False, relu=False):
         """
         This is a wrapper for implementing a residual layer with incepted connections
         :param scope:
@@ -620,7 +734,6 @@ class SODMatrix(object):
         :param k_prob: keep probability for dropout
         :param padding: SAME or VALID
         :param phase_train: For batch norm implementation
-        :param summary: whether to produce a tensorboard summary of this layer
         :param DSC: Whether to perform standard downsample or incepted downsample
         :param BN: Whether to batch norm. Defaults to false to plug into another residual
         :param relu: whether to apply a nonlinearity at the end.
@@ -640,19 +753,19 @@ class SODMatrix(object):
             if K_prob: conv1 = tf.nn.dropout(conv1, K_prob)
 
             # Another Convolution with BN and ReLu
-            conv2 = self.inception_layer('Conv2', conv1, K, 1, padding, phase_train, summary, True, True)
+            conv2 = self.inception_layer('Conv2', conv1, K, 1, padding, phase_train, True, True)
 
             # Second dropout
             if K_prob: conv2 = tf.nn.dropout(conv2, K_prob)
 
             # Final downsampled conv without BN or RELU
             if DSC:
-                conv = self.inception_layer('ConvFinal', conv2, K, 1, padding, phase_train, summary, False, False)
-                conv = self.incepted_downsample(conv, summary=summary)
-            else: conv = self.inception_layer('ConvFinal', conv2, K*S, S, padding, phase_train, summary, False, False)
+                conv = self.inception_layer('ConvFinal', conv2, K, 1, padding, phase_train, False, False)
+                conv = self.incepted_downsample(conv)
+            else: conv = self.inception_layer('ConvFinal', conv2, K*S, S, padding, phase_train, False, False)
 
             # Downsample the residual input if we did the conv layer. pool or strided
-            if DSC: X = self.incepted_downsample(X, summary=summary)
+            if DSC: X = self.incepted_downsample(X)
             elif S>1: X = self.convolution('ResDown', X, 2, K*S, S, phase_train=phase_train, BN=False, relu=False)
 
             # The Residual block
@@ -668,7 +781,7 @@ class SODMatrix(object):
 
 
     def res_inc_layer_3d(self, scope, X, Fz, K, S=2, K_prob=None, padding='SAME',
-                       phase_train=None, summary=True, DSC=False, BN=False, relu=False):
+                       phase_train=None, DSC=False, BN=False, relu=False):
         """
         This is a wrapper for implementing a residual layer with incepted layers between
         :param scope:
@@ -679,7 +792,6 @@ class SODMatrix(object):
         :param k_prob: keep probability for dropout
         :param padding: SAME or VALID
         :param phase_train: For batch norm implementation
-        :param summary: whether to produce a tensorboard summary of this layer
         :param DSC: Whether to perform standard downsample or incepted downsample
         :param BN: Whether to batch norm. Defaults to false to plug into another residual
         :param relu: whether to apply a nonlinearity at the end.
@@ -699,19 +811,19 @@ class SODMatrix(object):
             if K_prob: conv1 = tf.nn.dropout(conv1, K_prob)
 
             # Another Convolution with BN and ReLu
-            conv2 = self.inception_layer_3d('Inc1', conv1, K, Fz, 1, padding, phase_train, summary, True, True)
+            conv2 = self.inception_layer_3d('Inc1', conv1, K, Fz, 1, padding, phase_train, True, True)
 
             # Second dropout
             if K_prob: conv2 = tf.nn.dropout(conv2, K_prob)
 
             # Final downsampled conv without BN or RELU
             if DSC:
-                conv = self.inception_layer_3d('IncFinal', conv2, K, Fz, 1, padding, phase_train, summary, False, False)
-                conv = self.incepted_downsample_3d(conv, summary=summary)
-            else: conv = self.inception_layer_3d('IncFinal', conv2, K*S, Fz, S, padding, phase_train, summary, False, False)
+                conv = self.inception_layer_3d('IncFinal', conv2, K, Fz, 1, padding, phase_train, False, False)
+                conv = self.incepted_downsample_3d(conv)
+            else: conv = self.inception_layer_3d('IncFinal', conv2, K*S, Fz, S, padding, phase_train, False, False)
 
             # Downsample the residual input if we did the conv layer. pool or strided
-            if DSC: X = self.incepted_downsample_3d(X, summary=summary)
+            if DSC: X = self.incepted_downsample_3d(X)
             elif S>1: X = self.convolution_3d('ResDown', X, 2, K*S, S, phase_train=phase_train, BN=False, relu=False)
 
             # The Residual block
@@ -729,8 +841,7 @@ class SODMatrix(object):
     # ***************  Miscellaneous layers ***************
 
 
-    def fc7_layer(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5,
-                  summary=True, BN=False, relu=True, override=None, pad='VALID'):
+    def fc7_layer(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5, BN=False, relu=True, override=None, pad='VALID'):
 
         """
         Wrapper for implementing an FC layer based on a conv layer
@@ -740,7 +851,6 @@ class SODMatrix(object):
         :param dropout: Whether to implement dropout here
         :param phase_train: Are we in testing or training phase = only relevant for dropout
         :param keep_prob: if doing dropout, the keep probability
-        :param summary: Whether to output a summaryb: 
         :param BN: Batch norm or not
         :param relu: relu or not
         :param override: to override conv dimensions, if you want to average activations
@@ -788,13 +898,13 @@ class SODMatrix(object):
                 conv = tf.nn.avg_pool(conv, [1, F, F, 1], [1, 2, 2, 1], 'VALID')
 
             # Activation summary
-            if summary: self._activation_summary(conv)
+            if self.summary: self._activation_summary(conv)
 
             return tf.squeeze(conv)
 
 
     def fc7_layer_3d(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5,
-                  summary=True, BN=False, relu=True, override=None, pad='VALID'):
+                  BN=False, relu=True, override=None, pad='VALID'):
 
         """
         Wrapper for implementing a 3D FC layer based on a conv layer
@@ -804,7 +914,6 @@ class SODMatrix(object):
         :param dropout: Whether to implement dropout here
         :param phase_train: Are we in testing or training phase = only relevant for dropout
         :param keep_prob: if doing dropout, the keep probability
-        :param summary: Whether to output a summaryb: 
         :param BN: Batch norm or not
         :param relu: relu or not
         :param override: to override conv dimensions, if you want to average activations
@@ -852,12 +961,12 @@ class SODMatrix(object):
                 conv = tf.nn.avg_pool3d(conv, [1, F, F, F, 1], [1, 2, 2, 2, 1], 'VALID')
 
             # Activation summary
-            if summary: self._activation_summary(conv)
+            if self.summary: self._activation_summary(conv)
 
             return tf.squeeze(conv)
 
 
-    def fc7_layer_old(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5, summary=True, BN=False):
+    def fc7_layer_old(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5, BN=False):
         """
         Wrapper for implementing a fully connected layer
         :param scope: Scopename of the layer
@@ -866,7 +975,6 @@ class SODMatrix(object):
         :param dropout: Whether to implement dropout here
         :param phase_train: Are we in testing or training phase = only relevant for dropout
         :param keep_prob: if doing dropout, the keep probability
-        :param summary: Whether to output a summary
         :return: fc7: the result of all of the above
         """
 
@@ -901,13 +1009,12 @@ class SODMatrix(object):
             if (phase_train == True) and dropout: fc7 = tf.nn.dropout(fc7, keep_prob)
 
             # Activation summary
-            if summary: self._activation_summary(fc7)
+            if self.summary: self._activation_summary(fc7)
 
             return fc7
 
 
-    def linear_layer(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5,
-                     summary=True, BN=False, relu=True, add_bias=True):
+    def linear_layer(self, scope, X, neurons, dropout=False, phase_train=True, keep_prob=0.5, BN=False, relu=True, add_bias=True):
         """
         Wrapper for implementing a linear layer without or without relu/bn/dropout
         :param scope: internal name
@@ -916,7 +1023,6 @@ class SODMatrix(object):
         :param dropout: whether to use dropout
         :param phase_train: are we in train or test phase
         :param keep_prob: if using dropout, the keep prob
-        :param summary: whether to output a summary
         :param BN: whether to use batch norm
         :param relu: whether to use a nonlinearity
         :param add_bias: Whether to add a bias term here
@@ -961,7 +1067,7 @@ class SODMatrix(object):
             if (phase_train == True) and dropout: linear = tf.nn.dropout(linear, keep_prob)
 
             # Activation summary
-            if summary: self._activation_summary(linear)
+            if self.summary: self._activation_summary(linear)
 
             return linear
 
@@ -1006,7 +1112,7 @@ class SODMatrix(object):
             return h_trans
 
 
-    def transitional_layer(self, scope, X, K, S=1, padding='SAME', phase_train=None, summary=True, BN=True, relu=True):
+    def transitional_layer(self, scope, X, K, S=1, padding='SAME', phase_train=None, BN=True, relu=True):
         """
         This function implements a transition layer to insert before the FC layer. Improves regularization
         :param scope:
@@ -1015,7 +1121,6 @@ class SODMatrix(object):
         :param S: Stride Whether to downsample the convoluted inceptions
         :param padding:
         :param phase_train: For batch norm implementation
-        :param summary: whether to produce a tensorboard summary of this layer
         :param BN: whether to perform batch normalization
         :return: the inception layer output after concat
         """
@@ -1027,15 +1132,15 @@ class SODMatrix(object):
             F = X.get_shape().as_list()[1]
 
             # First branch, 7x7 conv then global avg pool
-            inception1a = self.convolution('Transition1', X, 7, K, S, 'SAME', phase_train, summary, BN, relu)
+            inception1a = self.convolution('Transition1', X, 7, K, S, padding, phase_train, BN, relu)
             inception1 = tf.nn.avg_pool(inception1a, [1, F, F, 1], [1, 2, 2, 1], 'VALID')
 
             # Second branch, 5x5 conv then global avg pool
-            inception2a = self.convolution('Transition2', X, 5, K, S, 'SAME', phase_train, summary, BN, relu)
+            inception2a = self.convolution('Transition2', X, 5, K, S, padding, phase_train, BN, relu)
             inception2 = tf.nn.avg_pool(inception2a, [1, F, F, 1], [1, 2, 2, 1], 'VALID')
 
             # Third branch, 3x3 conv then global avg pool
-            inception3a = self.convolution('Transition3', X, 3, K, S, 'SAME', phase_train, summary, BN, relu)
+            inception3a = self.convolution('Transition3', X, 3, K, S, padding, phase_train, BN, relu)
             inception3 = tf.nn.avg_pool(inception3a, [1, F, F, 1], [1, 2, 2, 1], 'VALID')
 
             # Concatenate the results
@@ -1044,14 +1149,13 @@ class SODMatrix(object):
             return tf.squeeze(inception)
 
 
-    def incepted_downsample(self, X, S=2, padding='SAME', summary=True):
+    def incepted_downsample(self, X, S=2, padding='SAME'):
         """
         This function implements a downsampling layer that utilizes both an average and max pooling operation
         :param scope:
         :param X: Output of the previous layer
         :param S: The degree of downsampling or stride
         :param padding: SAME or VALID
-        :param summary: whether to produce a tensorboard summary of this layer
         :return: the layer output after concat
         """
 
@@ -1065,19 +1169,18 @@ class SODMatrix(object):
         inception = tf.concat([avg, maxi], -1)
 
         # Create a histogram/scalar summary of the conv1 layer
-        if summary: self._activation_summary(inception)
+        if self.summary: self._activation_summary(inception)
 
         return inception
 
 
-    def incepted_downsample_3d(self, X, S=2, padding='SAME', summary=True):
+    def incepted_downsample_3d(self, X, S=2, padding='SAME'):
         """
         This function implements a 3d downsampling layer that utilizes both an average and max pooling operation
         :param scope:
         :param X: Output of the previous layer
         :param S: The degree of downsampling or stride
         :param padding: SAME or VALID
-        :param summary: whether to produce a tensorboard summary of this layer
         :return: the layer output after concat
         """
 
@@ -1091,7 +1194,7 @@ class SODMatrix(object):
         inception = tf.concat([avg, maxi], -1)
 
         # Create a histogram/scalar summary of the conv1 layer
-        if summary: self._activation_summary(inception)
+        if self.summary: self._activation_summary(inception)
 
         return inception
 
@@ -1138,7 +1241,7 @@ class SODMatrix(object):
 
 
 
-    def segmentation_SCE_loss(self, logits, labelz, class_factor=1.2, summary=True):
+    def segmentation_SCE_loss(self, logits, labelz, class_factor=1.2):
         """
         Calculates cross entropy for a segmentation type network. Made for Unet segmentation of lung nodules
         :param logits: logits from the forward pass. (batch, H, W, 1)
@@ -1173,7 +1276,7 @@ class SODMatrix(object):
         loss = tf.reduce_mean(loss)
 
         # Output the summary
-        if summary: tf.summary.scalar('loss', loss)
+        if self.summary: tf.summary.scalar('loss', loss)
 
         # Add these losses to the collection
         tf.add_to_collection('losses', loss)
@@ -1181,7 +1284,7 @@ class SODMatrix(object):
         return loss
 
 
-    def MSE_loss(self, logits, labels, mask_factor=0.0, mask_avg=0.0, mask_norm=0.0, summary=True, debug=False):
+    def MSE_loss(self, logits, labels, mask_factor=0.0, mask_avg=0.0, mask_norm=0.0, debug=False):
         """
         Calculates the mean squared error, made for boneAge linear regressor output.
         :param logits: not really logits but outputs of the network
@@ -1214,7 +1317,7 @@ class SODMatrix(object):
         else: MSE_loss = tf.reduce_mean(tf.square(labels - logits))
 
         # Output the summary of the MSE and MAE
-        if summary:
+        if self.summary:
             tf.summary.scalar('Square Error', MSE_loss)
             tf.summary.scalar('Absolute Error', tf.reduce_mean(tf.abs(labels - logits)))
 
@@ -1225,13 +1328,12 @@ class SODMatrix(object):
         return MSE_loss
 
 
-    def SCE_loss(self, logits, labels, num_classes, summary=True):
+    def SCE_loss(self, logits, labels, num_classes):
         """
         Calculates the softmax cross entropy loss between logits and labels
         :param logits:
         :param labels:
         :param num_classes: the number of classes
-        :param summary: whether to output a summary of the loss to tensorboard
         :return:
         """
         # Change labels to one hot
@@ -1244,7 +1346,7 @@ class SODMatrix(object):
         loss = tf.reduce_mean(loss)
 
         # Output the summary of the MSE and MAE
-        if summary: tf.summary.scalar('Cross Entropy', loss)
+        if self.summary: tf.summary.scalar('Cross Entropy', loss)
 
         # Add these losses to the collection
         tf.add_to_collection('losses', loss)
@@ -1289,11 +1391,10 @@ class SODMatrix(object):
         return loss
 
 
-    def calc_L2_Loss(self, L2_gamma, summary=True):
+    def calc_L2_Loss(self, L2_gamma):
         """
         Calculates the L2 Loss
         :param L2_gamma:
-        :param summary: Whether to create a tensorboard summary
         :return:
         """
 
@@ -1307,7 +1408,7 @@ class SODMatrix(object):
         tf.add_to_collection('losses', L2_loss)
 
         # Activation summary
-        if summary: tf.summary.scalar('L2_Loss', L2_loss)
+        if self.summary: tf.summary.scalar('L2_Loss', L2_loss)
 
         return L2_loss
 
@@ -1330,7 +1431,7 @@ class SODMatrix(object):
         return tf.div(exponential_map, tensor_sum_exp)
 
 
-    def DICE_loss(self, logitz, labelz, num_classes=2, network_dims=64, summary=True):
+    def DICE_loss(self, logitz, labelz, num_classes=2, network_dims=64):
 
         """
         Cost function
@@ -1349,7 +1450,7 @@ class SODMatrix(object):
         labels = tf.cast(labelz > 1, tf.uint8)
 
         # Summary images
-        if summary:
+        if self.summary:
             tf.summary.image('Labels', tf.reshape(tf.cast(labels[2], tf.float32), shape=[1, network_dims, network_dims, 1]), 2)
             tf.summary.image('Logits', tf.reshape(logitz[2, :, :, 1], shape=[1, network_dims, network_dims, 1]), 2)
 
@@ -1895,7 +1996,7 @@ class DenseUnet(DenseNet):
             return conv, tf.squeeze(concat)
 
 
-    def up_transition(self, scope, X, F, K, S, concat_var=None, summary=True, padding='SAME'):
+    def up_transition(self, scope, X, F, K, S, concat_var=None, padding='SAME'):
 
         """
         Deconvolutions for the DenseUnet
@@ -1941,12 +2042,12 @@ class DenseUnet(DenseNet):
             conv = tf.concat([concat_var, conv], axis=-1)
 
             # Create a histogram summary and summary of sparsity
-            if summary: self._activation_summary(conv)
+            if self.summary: self._activation_summary(conv)
 
             return conv
 
 
-    def up_transition_3d(self, scope, X, F, K, S, concat_var=None, summary=True, padding='VALID'):
+    def up_transition_3d(self, scope, X, F, K, S, concat_var=None, padding='VALID'):
 
         """
         Deconvolutions for the DenseUnet
@@ -1993,7 +2094,7 @@ class DenseUnet(DenseNet):
             conv = tf.concat([concat_var, conv], axis=-1)
 
             # Create a histogram summary and summary of sparsity
-            if summary: self._activation_summary(conv)
+            if self.summary: self._activation_summary(conv)
 
             return conv
 
