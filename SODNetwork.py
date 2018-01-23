@@ -134,14 +134,14 @@ class SODMatrix(object):
             try: conv = tf.nn.conv3d(X, kernel, [1, S[0], S[1], S[2], 1], padding=padding)
             except: conv = tf.nn.conv3d(X, kernel, [1, S, S, S, 1], padding=padding)
 
-            # Apply the batch normalization. Updates weights during training phase only
-            if BN: conv = self.batch_normalization(conv, phase_train, scope)
-
             # Add the bias
             conv = tf.nn.bias_add(conv, bias)
 
             # Relu activation
             if relu: conv = tf.nn.relu(conv, name=scope.name)
+
+            # Apply the batch normalization. Updates weights during training phase only
+            if BN: conv = self.batch_normalization(conv, phase_train, scope)
 
             # Channel wise Dropout
             if dropout and phase_train == True: conv = tf.nn.dropout(conv, dropout, noise_shape=[B, 1, 1, 1, C])
@@ -513,7 +513,7 @@ class SODMatrix(object):
 
             # Downsample the residual input if we did the conv layer. pool or strided
             if DSC: X = self.incepted_downsample(X)
-            elif S>1: X = self.convolution('ResDown', X, 2, K*S, S, phase_train=phase_train, BN=False, relu=False)
+            elif S>1: X = self.convolution('ResDown', X, 1, K*S, S, phase_train=phase_train, BN=False, relu=False)
 
             # Apply the batch normalization. Updates weights during training phase only
             if BN: conv = self.batch_normalization(conv, phase_train, scope)
@@ -659,7 +659,7 @@ class SODMatrix(object):
             return conv
 
 
-    def residual_layer_3d(self, scope, X, F, K, S=2, K_prob=None, padding='SAME',
+    def residual_layer_stanford_3d(self, scope, X, F, K, S=2, K_prob=None, padding='SAME',
                        phase_train=None, DSC=False, BN=False, relu=False, dropout=None):
         """
         This is a wrapper for implementing a stanford style residual layer in 3 dimensions
@@ -702,7 +702,7 @@ class SODMatrix(object):
 
             # Downsample the residual input if we did the conv layer. pool or strided
             if DSC: X = self.incepted_downsample_3d(X)
-            elif S>1: X = self.convolution_3d('ResDown', X, 2, K*S, S, phase_train=phase_train, BN=False, relu=False)
+            elif S>1: X = self.convolution_3d('ResDown', X, 1, K*S, S, phase_train=phase_train, BN=False, relu=False)
 
             # Apply the batch normalization. Updates weights during training phase only
             if BN: conv = self.batch_normalization(conv, phase_train, 'BNRes')
@@ -718,9 +718,94 @@ class SODMatrix(object):
             B = residual.get_shape().as_list()[0]
 
             # Apply channel wise dropout here
-            if dropout and phase_train == True: residual = tf.nn.dropout(residual, dropout, noise_shape=[B, 1, 1, C])
+            if dropout and phase_train == True: residual = tf.nn.dropout(residual, dropout, noise_shape=[B, 1, 1, 1, C])
 
             return residual
+
+
+    def residual_layer_3d(self, scope, residual, F, K, S=2, padding='SAME', phase_train=None, dropout=None):
+
+        """
+        This is a wrapper for implementing a microsoft style residual layer
+        :param scope:
+        :param residual: Output of the previous layer
+        :param F: Dimensions of the second convolution in F(x) - the non inception layer one
+        :param K: Feature maps in the inception layer (will be multiplied by 4 during concatenation)
+        :param S: Stride of the convolution, whether to downsample
+        :param padding: SAME or VALID
+        :param phase_train: For batch norm implementation
+        :param dropout: keep prob for applying channel wise dropout
+        :return:
+        """
+
+        # Set the scope. Implement a residual layer below
+        with tf.variable_scope(scope) as scope:
+
+            # First Convolution with BN and ReLU
+            conv = self.convolution_3d('Conv1', residual, F, K, S, padding, phase_train, True, True)
+
+            # Second convolution without ReLU
+            conv = self.convolution_3d('Conv2', conv, F, K, 1, padding, phase_train, True, False)
+
+            # Downsample the residual input using strided 1x1 conv
+            if S>1: residual = self.convolution_3d('Res_down', residual, 1, K, S, padding, phase_train, True, False)
+
+            # Add the Residual
+            conv = tf.add(conv, residual)
+            conv = tf.nn.relu(conv, name=scope.name)
+
+            # Get dimensions
+            C = conv.get_shape().as_list()[-1]
+            B = conv.get_shape().as_list()[0]
+
+            # Apply channel wise dropout here
+            if dropout and phase_train == True: conv = tf.nn.dropout(conv, dropout, noise_shape=[B, 1, 1, 1, C])
+
+            return conv
+
+
+    def residual_bottleneck_layer_3d(self, scope, residual, F, K, S=2, padding='SAME', phase_train=None, dropout=None):
+
+        """
+        This is a wrapper for implementing a microsoft style residual layer with bottlenecks for deep networks
+        :param scope:
+        :param residual: Output of the previous layer
+        :param F: Dimensions of the second convolution in F(x) - the non inception layer one
+        :param K: Feature maps in the inception layer (will be multiplied by 4 during concatenation)
+        :param S: Stride of the convolution, whether to downsample
+        :param padding: SAME or VALID
+        :param phase_train: For batch norm implementation
+        :param dropout: keep prob for applying channel wise dropout
+        :return:
+        """
+
+        # Set the scope. Implement a residual layer below
+        with tf.variable_scope(scope) as scope:
+
+            # First Convolution with BN and ReLU
+            conv = self.convolution_3d('Conv1', residual, 1, int(K/4), S, padding, phase_train, True, True)
+
+            # Second convolution with BN and ReLU
+            conv = self.convolution_3d('Conv2', conv, F, int(K/4), 1, padding, phase_train, True, True)
+
+            # Third layer without ReLU
+            conv = self.convolution_3d('Conv3', conv, 1, K, 1, padding, phase_train, True, False)
+
+            # Downsample the residual input using strided 1x1 conv
+            if S > 1: residual = self.convolution_3d('Res_down', residual, 1, K, S, padding, phase_train, True, False)
+
+            # Add the Residual
+            conv = tf.add(conv, residual)
+            conv = tf.nn.relu(conv, name=scope.name)
+
+            # Get dimensions
+            C = conv.get_shape().as_list()[-1]
+            B = conv.get_shape().as_list()[0]
+
+            # Apply channel wise dropout here
+            if dropout and phase_train == True: conv = tf.nn.dropout(conv, dropout, noise_shape=[B, 1, 1, 1, C])
+
+            return conv
 
 
     def res_inc_layer(self, scope, X, K, S=2, K_prob=None, padding='SAME',
