@@ -178,6 +178,7 @@ class SODLoader():
         :return: accno = the accession number
         :return: dims = the dimensions of the image
         :return: window = the window level of the file
+        :return: photometric = the photometric interpretation. 1 = min values white, 2 = min values black
         """
 
         # Load the Dicom
@@ -190,10 +191,13 @@ class SODLoader():
         # Retreive the dimensions of the scan
         dims = np.array([int(ndimage.Columns), int(ndimage.Rows)])
 
-        try:
-            # Retreive the window level
-            window = [int(ndimage.WindowCenter), int(ndimage.WindowWidth)]
+        # Retreive window level if available
+        try: window = [int(ndimage.WindowCenter), int(ndimage.WindowWidth)]
         except: window = None
+
+        # Retreive photometric interpretation (1 = negative XRay) if available
+        try: photometric = int(ndimage.PhotometricInterpretation[-1])
+        except: photometric = None
 
         # Retreive the dummy accession number
         accno = int(ndimage.AccessionNumber)
@@ -216,7 +220,7 @@ class SODLoader():
             image += dtype(intercept)
         except: pass
 
-        return image, accno, dims, window
+        return image, accno, dims, window, photometric
 
 
     def load_CSV_Dict(self, indexname, path):
@@ -1509,7 +1513,7 @@ class SODLoader():
         if plot: plt.show()
 
 
-    def generate_image_text_overlay(self, text, image, dim_3d=False, color=1.0):
+    def generate_image_text_overlay(self, text, image, dim_3d=False, color=1.0, scale=0.5, thickness=1):
         """
         This function displays text over an image
         :param text: The text to overlay
@@ -1529,8 +1533,8 @@ class SODLoader():
 
         # Create a copy of the image with text
         if not dim_3d:
-            texted_image = cv2.putText(img=np.copy(image), text=text, org=origin, fontFace=0, fontScale=0.5,
-                                   color=text_color, thickness=1)
+            texted_image = cv2.putText(img=np.copy(image), text=text, org=origin, fontFace=0, fontScale=scale,
+                                   color=text_color, thickness=thickness)
 
         # For 3D, loop and addend a copied image volume
         else:
@@ -1794,6 +1798,22 @@ class SODLoader():
 
         # Close the file after writing
         for y in range(xvals): writer[y].close()
+
+
+    def convert_xray_negative(self, image):
+
+        """
+        Converts an xray into into it's negative
+        :param image: input 2D xray as ndarray
+        :return: the negative
+        """
+
+        # Get the variables needed for the math
+        smallest, largest = np.amin(image), np.amax(image)
+        average = (largest - smallest) / 2
+
+        # Do the image transform
+        return ((image - average) * -1) + average
 
 
     """
