@@ -364,25 +364,23 @@ class SODMatrix(object):
         # Implement an inception layer here ----------------
         with tf.variable_scope(scope) as scope:
 
-            # First branch, 1x1x64 convolution
+            # First branch, 1x1xK convolution
             inception1 = self.convolution('Inception1', X, 1, K, S, phase_train=phase_train,  BN=BN, relu=relu)
 
-            # Second branch, 1x1 convolution then 3x3 convolution
-            inception2a = self.convolution('Inception2a', X, 1, K, S, phase_train=phase_train)
+            # Second branch, 1x1 bottleneck then 3x3 convolution
+            inception2 = self.convolution('Inception2a', X, 1, K, S, phase_train=phase_train)
+            inception2 = self.convolution('Inception2', inception2, 3, K, 1, phase_train=phase_train, BN=BN, relu=relu)
 
-            inception2 = self.convolution('Inception2', inception2a, 3, K, 1, phase_train=phase_train, BN=BN, relu=relu)
-
-            # Third branch, 1x1 convolution then 5x5 convolution:
-            inception3a = self.convolution('Inception3a', X, 1, K, S, phase_train=phase_train)
-
-            inception3 = self.convolution('Inception3', inception3a, 5, K, 1, phase_train=phase_train, BN=BN, relu=relu)
+            # Third branch, 1x1 bottleneck then two 3x3 convolutions (5x5 mimic):
+            inception3 = self.convolution('Inception3a', X, 1, K, S, phase_train=phase_train)
+            inception3 = self.convolution('Inception3b', inception3, 3, K, 1, phase_train=phase_train, BN=BN, relu=relu)
+            inception3 = self.convolution('Inception3', inception3, 3, K, 1, phase_train=phase_train, BN=BN, relu=relu)
 
             # Fourth branch, max pool then 1x1 conv:
-            inception4a = tf.nn.max_pool(X, [1, 3, 3, 1], [1, 1, 1, 1], padding)
+            inception4 = tf.nn.max_pool(X, [1, 3, 3, 1], [1, 1, 1, 1], padding)
+            inception4 = self.convolution('Inception4', inception4, 1, K, S, phase_train=phase_train, BN=BN, relu=relu)
 
-            inception4 = self.convolution('Inception4', inception4a, 1, K, S, phase_train=phase_train, BN=BN, relu=relu)
-
-            # Concatenate the results for dimension of 64,64,256
+            # Concatenate the results
             inception = tf.concat([inception1, inception2, inception3, inception4], axis=-1)
 
             # Get dimensions
@@ -435,24 +433,19 @@ class SODMatrix(object):
                                           phase_train=phase_train, BN=BN, relu=relu)
 
             # Second branch, 1x1 convolution then 3x3 convolution
-            inception2a = self.convolution_3d('Inception2a', X, [Fz, 1, 1], K, S,
+            inception2 = self.convolution_3d('Inception2a', X, [Fz, 1, 1], K, S,
                                            phase_train=phase_train)
-
-            inception2 = self.convolution_3d('Inception2', inception2a, [1, 3, 3], K, 1,
+            inception2 = self.convolution_3d('Inception2', inception2, [1, 3, 3], K, 1,
                                           phase_train=phase_train, BN=BN, relu=relu)
 
             # Third branch, 1x1 convolution then 5x5 convolution:
-            inception3a = self.convolution_3d('Inception3a', X, [Fz, 1, 1], K, S,
-                                           phase_train=phase_train)
-
-            inception3 = self.convolution_3d('Inception3', inception3a, [1, 5, 5], K, 1,
-                                          phase_train=phase_train, BN=BN, relu=relu)
+            inception3 = self.convolution_3d('Inception3a', X, [Fz, 1, 1], K, S, phase_train=phase_train)
+            inception3 = self.convolution_3d('Inception3b', inception3, [1, 3, 3], K, 1, phase_train=phase_train, BN=BN, relu=relu)
+            inception3 = self.convolution_3d('Inception3', inception3, [1, 3, 3], K, 1, phase_train=phase_train, BN=BN, relu=relu)
 
             # Fourth branch, max pool then 1x1 conv:
-            inception4a = tf.nn.max_pool3d(X, [1, Fz, 3, 3, 1], [1, 1, 1, 1, 1], padding)
-
-            inception4 = self.convolution_3d('Inception4', inception4a, 1, K, S,
-                                          phase_train=phase_train, BN=BN, relu=relu)
+            inception4 = tf.nn.max_pool3d(X, [1, Fz, 3, 3, 1], [1, 1, 1, 1, 1], padding)
+            inception4 = self.convolution_3d('Inception4', inception4, 1, K, S, phase_train=phase_train, BN=BN, relu=relu)
 
             # Concatenate the results
             inception = tf.concat([inception1, inception2, inception3, inception4], axis=-1)
