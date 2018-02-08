@@ -5,16 +5,17 @@ mean absolute error, mean squared error, DICE score, sensitivity, specificity, A
 
 """
 
-import os, glob, argparse
-
 import matplotlib.pyplot as plt
 import numpy as np
 import sklearn.metrics as skm
 import pandas as pd
-
-from scipy import interp
 import tensorflow as tf
 
+from skimage.transform import resize
+from scipy import interp
+
+import cv2
+import scipy.misc
 
 class SODTester():
 
@@ -1095,3 +1096,61 @@ class SODTester():
         if plot: plt.show()
 
         return returns
+
+
+    def visualize(self, image, conv_output, conv_grad, gb_viz, index, display, network_dims, save_dir):
+
+        """
+        Generates and displays Grad-CAM, Guided backprop and guided grad CAM visualizations
+        :param image: The specific image in this batch. Must have 2+ channels...
+        :param conv_output: The output of the last conv layer
+        :param conv_grad: Partial derivatives of the last conv layer wrt class 1 ?
+        :param gb_viz: gradient of the cost wrt the images
+        :param index: which image in this batch we're working with
+        :param display: whether to display images with matplotlib
+        :return:
+        """
+
+        # Set output and grad
+        output = conv_output  # i.e. [4,4,256]
+        grads_val = conv_grad  # i.e. [4,4,256]
+        print("grads_val shape: ", grads_val.shape, 'Output shape: ', output.shape)
+
+        # Retreive mean weights of each filter?
+        weights = np.mean(grads_val, axis=(0, 1))  # alpha_k, [256]
+        cam = np.zeros(output.shape[0: 2], dtype=np.float32)  # [7,7]
+
+        # Taking a weighted average
+        for i, w in enumerate(weights): cam += w * output[:, :, i]
+
+        # Passing through ReLU
+        cam = np.maximum(cam, 0)
+        cam = cam / np.max(cam)  # scale 0 to 1.0
+        cam = resize(cam, (network_dims, network_dims), preserve_range=True)
+
+        # Generate image
+        img = image.astype(float)
+        img -= np.min(img)
+        img /= img.max()
+        if display: self.display_single_image(img[:, :, 0], False, ('Input Image', img.shape))
+
+        # Generate heatmap
+        cam_heatmap = cv2.applyColorMap(np.uint8(255 * cam), cv2.COLORMAP_JET)
+        cam_heatmap = cv2.cvtColor(cam_heatmap, cv2.COLOR_BGR2RGB)
+        if display: self.display_single_image(cam_heatmap, False, ('Grad-CAM', cam_heatmap.shape))
+
+        # Generate guided backprop mask
+        gb_viz = np.dstack((gb_viz[:, :, 0]))
+        gb_viz -= np.min(gb_viz)
+        gb_viz /= gb_viz.max()
+        if display: self.display_single_image(gb_viz[0], False, ('Guided Backprop', gb_viz.shape))
+
+        # Generate guided grad cam
+        gd_gb = np.dstack((gb_viz[0] * cam))
+        if display: self.display_single_image(gd_gb[0], True, ('Guided Grad-CAM', gd_gb.shape))
+
+        # Save Data
+        scipy.misc.imsave((save_dir + ('Visualizations/%s_aimg.png' % index)), img[:, :, 0])
+        scipy.misc.imsave((save_dir + ('Visualizations/%s_Grad_Cam.png' % index)), cam_heatmap)
+        scipy.misc.imsave((save_dir + ('Visualizations/%s_Guided_Backprop.png' % index)),gb_viz[0])
+        scipy.misc.imsave((save_dir + ('Visualizations/%s_Guided_Grad_Cam.png' % index)), gd_gb[0])
