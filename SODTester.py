@@ -1150,7 +1150,7 @@ class SODTester():
         if display: self.display_single_image(gd_gb[0], True, ('Guided Grad-CAM', gd_gb.shape))
 
         # Save Data
-        scipy.misc.imsave((save_dir + ('Visualizations/%s_aimg.png' % index)), img[:, :, 0])
-        scipy.misc.imsave((save_dir + ('Visualizations/%s_Grad_Cam.png' % index)), cam_heatmap)
-        scipy.misc.imsave((save_dir + ('Visualizations/%s_Guided_Backprop.png' % index)),gb_viz[0])
-        scipy.misc.imsave((save_dir + ('Visualizations/%s_Guided_Grad_Cam.png' % index)), gd_gb[0])
+        scipy.misc.imsave((save_dir + ('%s_aimg.png' % index)), img[:, :, 0])
+        scipy.misc.imsave((save_dir + ('%s_Grad_Cam.png' % index)), cam_heatmap)
+        scipy.misc.imsave((save_dir + ('%s_Guided_Backprop.png' % index)),gb_viz[0])
+        scipy.misc.imsave((save_dir + ('%s_Guided_Grad_Cam.png' % index)), gd_gb[0])
