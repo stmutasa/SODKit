@@ -16,6 +16,7 @@ import SimpleITK as sitk
 import scipy.ndimage as scipy
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
+import pandas as pd
 
 from scipy.io import loadmat
 from skimage import morphology
@@ -255,6 +256,19 @@ class SODLoader():
             return_dict[key] = row
 
         return return_dict
+
+
+    def save_Dict_CSV(self, dict, path):
+        """
+        Saves a dictionary as a .CSV file
+        :param dict: the input dictionary
+        :param path: path to save
+        :return:
+        """
+
+        # Define data frame and create a CSV from it
+        df = pd.DataFrame.from_dict(dict, orient='index')
+        df.to_csv(path)
 
 
     def save_dict_pickle(self, dictionary, data_root='data/filetypes'):
