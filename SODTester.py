@@ -1153,8 +1153,9 @@ class SODTester():
 
         # Save Data
         scipy.misc.imsave((save_dir + ('%s_aimg.png' % index)), img[:, :, 0])
-        # scipy.misc.imsave((save_dir + ('%s_Grad_Cam.png' % index)), np.swapaxes(cam_heatmap, 0, 1))
-        # scipy.misc.imsave((save_dir + ('%s_Guided_Backprop.png' % index)), gb_viz[0].T)
+        scipy.misc.imsave((save_dir + ('%s_Grad_Cam_SWAP.png' % index)), np.swapaxes(cam_heatmap, 0, 1))
+        scipy.misc.imsave((save_dir + ('%s_Grad_Cam_T.png' % index)), np.swapaxes(cam_heatmap.T, 0, -1))
+        scipy.misc.imsave((save_dir + ('%s_Guided_Backprop_Swap.png' % index)), np.swapaxes(gb_viz[0], 0, 1))
         scipy.misc.imsave((save_dir + ('%s_Guided_Grad_Cam.png' % index)), gd_gb[0])
         scipy.misc.imsave((save_dir + ('%s_Grad_Cam.png' % index)), cam_heatmap)
         scipy.misc.imsave((save_dir + ('%s_Guided_Backprop.png' % index)), gb_viz[0])
