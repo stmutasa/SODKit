@@ -338,7 +338,7 @@ class SODTester():
     def retreive_metrics_classification(self, Epoch, display=True):
 
         """
-        Retreives sn, sp, PPV, NPV, ROC
+        Retreives sn, sp, PPV, NPV, ROC for two class model
         :param Epoch: What epoch we're in
         :param display: Whether to print the results
         :return: 
