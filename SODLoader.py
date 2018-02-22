@@ -314,7 +314,7 @@ class SODLoader():
             self.save_dict_pickle(pickle_dic, data_root)
 
 
-    def load_tfrecords(self, filenames, box_dims, image_dtype=tf.float32, channels=1):
+    def load_tfrecords(self, filenames, box_dims, image_dtype=tf.float32, channels=1, z_dim=None):
 
         """
         Function to load a tfrecord protobuf. numpy arrays (volumes) should have 'data' in them.
@@ -323,6 +323,7 @@ class SODLoader():
         :param box_dims: the dimensions of the image saved
         :param image_dtype: the data type of the image. i.e. tf.float32
         :param channels: how many channels in the image data
+        :param z_dim: if 3D, then the dimensions of the z dimension
         :return: data: dictionary with all the loaded tensors
         """
 
@@ -349,7 +350,8 @@ class SODLoader():
             # Depending on the type key or entry value, use a different cast function on the feature
             if 'data' in key:
                 data[key] = tf.decode_raw(features[key], image_dtype)
-                data[key] = tf.reshape(data[key], shape=[box_dims, box_dims, channels])
+                if z_dim: data[key] = tf.reshape(data[key], shape=[z_dim, box_dims, box_dims, channels])
+                else: data[key] = tf.reshape(data[key], shape=[box_dims, box_dims, channels])
                 data[key] = tf.cast(data[key], tf.float32)
 
             elif 'str' in value: data[key] = tf.cast(features[key], tf.string)
