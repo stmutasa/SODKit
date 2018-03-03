@@ -1800,13 +1800,14 @@ class DenseNet(SODMatrix):
 
     # Variables constant to all instances here
 
-    def __init__(self, nb_blocks, filters, sess, phase_train):
+    def __init__(self, nb_blocks, filters, sess, phase_train, summary):
 
         # Variables accessible to only specific instances here:
         self.nb_blocks = nb_blocks
         self.filters = filters
         self.sess = sess
         self.phase_train = phase_train
+        self.summary = summary
 
 
     def bottleneck_layer(self, X, scope, keep_prob=None):
@@ -1929,7 +1930,7 @@ class DenseNet(SODMatrix):
     def dense_block(self, input_x, nb_layers, layer_name, keep_prob=None, downsample=False):
 
         """
-        Creates a dense block
+        Creates a dense block connection all same sized filters
         :param input_x: The input to this dense block (output of prior downsample operation)
         :param nb_layers: how many layers desired
         :param layer_name: base name of this block
@@ -1964,6 +1965,10 @@ class DenseNet(SODMatrix):
                 # Append this layer to the running list of dense connected layers
                 layers_concat.append(conv)
 
+            # Combine the layers
+            conv = tf.concat(layers_concat, axis=-1)
+
+            # Downsample if requested
             if downsample: conv = self.transition_layer(conv, (layer_name+'_Downsample'), keep_prob)
 
             return conv
