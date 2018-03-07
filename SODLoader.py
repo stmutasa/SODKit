@@ -602,6 +602,30 @@ class SODLoader():
         return mask
 
 
+    def create_mammo_mask(self, image, threshold=800):
+
+        """
+
+        :param image: input mammogram
+        :param threshold: Pixel value to use for threshold
+        :return:
+        """
+
+        # Create the mask
+        mask = np.copy(image)
+
+        # Apply gaussian blur to smooth the image
+        mask = cv2.GaussianBlur(mask, (5, 5), 0)
+
+        # Threshold the image
+        mask = np.squeeze(mask < threshold)
+
+        # Invert mask
+        mask = ~mask
+
+        return mask
+
+
     def create_lung_mask(self, image, radius_erode=2):
         """
         Method to create lung mask.
