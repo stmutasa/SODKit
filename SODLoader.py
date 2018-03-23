@@ -1521,12 +1521,12 @@ class SODLoader():
         return returns
 
 
-    def display_volume(self, volume, plot=False):
+    def display_volume(self, volume, plot=False, cmap='gray'):
         #self.remove_keymap_conflicts({'j', 'k'})
         fig, ax = plt.subplots()
         ax.volume = volume
         ax.index = volume.shape[0] // 2
-        ax.imshow(volume[ax.index], cmap='gray')
+        ax.imshow(volume[ax.index], cmap=cmap)
         fig.canvas.mpl_connect('scroll_event', self.process_key)
         if plot: plt.show()
 
