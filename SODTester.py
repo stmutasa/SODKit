@@ -1098,7 +1098,7 @@ class SODTester():
         return returns
 
 
-    def visualize(self, image, conv_output, conv_grad, gb_viz, index, display, network_dims, save_dir):
+    def visualize(self, image, conv_output, conv_grad, gb_viz, index, display, network_dims, save_dir, img_channels=1):
 
         """
         Generates and displays Grad-CAM, Guided backprop and guided grad CAM visualizations
@@ -1108,13 +1108,19 @@ class SODTester():
         :param gb_viz: gradient of the cost wrt the images
         :param index: which image in this batch we're working with
         :param display: whether to display images with matplotlib
+        :param network_dims: dimensions of the input images to the network
+        :param save_dir: directory to save to
+        :param img_channels: number of channels in this image
         :return:
         """
+
+        # First delete the file if it exists and remake
+        if not tf.gfile.Exists(save_dir): tf.gfile.MakeDirs(save_dir)
 
         # Set output and grad
         output = conv_output  # i.e. [4,4,256]
         grads_val = conv_grad  # i.e. [4,4,256]
-        print(save_dir, "grads_val shape: ", grads_val.shape, 'Output shape: ', output.shape)
+        if index == 0: print('Saving to: ', save_dir, "Grads_val shape: ", grads_val.shape, 'Output shape: ', output.shape)
 
         # Retreive mean weights of each filter?
         weights = np.mean(grads_val, axis=(0, 1))  # alpha_k, [256]
@@ -1149,13 +1155,26 @@ class SODTester():
         # Generate guided grad cam
         gd_gb = np.dstack((gb_viz[0] * cam))
         if display: self.display_single_image(gd_gb[0], True, ('Guided Grad-CAM', gd_gb.shape))
-        print (gb_viz.shape, cam_heatmap.shape, cam_heatmap.T.shape, gb_viz.T.shape)
+        if index ==0: print ('Shapes: GB: %s, CAM: %s' %(gb_viz.shape, cam_heatmap.shape))
 
         # Save Data
-        scipy.misc.imsave((save_dir + ('%s_aimg.png' % index)), img[:, :, 0])
-        scipy.misc.imsave((save_dir + ('%s_Grad_Cam_SWAP.png' % index)), np.swapaxes(cam_heatmap, 0, 1))
-        scipy.misc.imsave((save_dir + ('%s_Grad_Cam_T.png' % index)), np.swapaxes(cam_heatmap.T, 0, -1))
-        scipy.misc.imsave((save_dir + ('%s_Guided_Backprop_Swap.png' % index)), np.swapaxes(gb_viz[0], 0, 1))
-        scipy.misc.imsave((save_dir + ('%s_Guided_Grad_Cam.png' % index)), gd_gb[0])
+        if img_channels==1: scipy.misc.imsave((save_dir + ('%s_aimg.png' % index)), img[:, :, 0])
+        else: scipy.misc.imsave((save_dir + ('%s_aimg.png' % index)), img)
+
         scipy.misc.imsave((save_dir + ('%s_Grad_Cam.png' % index)), cam_heatmap)
+        scipy.misc.imsave((save_dir + ('%s_Grad_Cam_Trans.png' % index)), np.swapaxes(cam_heatmap, 0, 1))
+        cc1 = np.swapaxes(cam_heatmap, 0, 1)
+        scipy.misc.imsave((save_dir + ('%s_Grad_Cam_FlipUD.png' % index)), np.flipud(cc1))
+        scipy.misc.imsave((save_dir + ('%s_Grad_Cam_FlipLR.png' % index)), np.fliplr(cc1))
+
         scipy.misc.imsave((save_dir + ('%s_Guided_Backprop.png' % index)), gb_viz[0])
+        scipy.misc.imsave((save_dir + ('%s_Guided_Backprop_Swap.png' % index)), np.swapaxes(gb_viz[0], 0, 1))
+        cc1 = np.swapaxes(gb_viz[0], 0, 1)
+        scipy.misc.imsave((save_dir + ('%s_Guided_Backprop_FlipUD.png' % index)), np.flipud(cc1))
+        scipy.misc.imsave((save_dir + ('%s_Guided_Backprop_FlipLR.png' % index)), np.fliplr(cc1))
+
+        scipy.misc.imsave((save_dir + ('%s_Guided_Grad_Cam.png' % index)), gd_gb[0])
+        scipy.misc.imsave((save_dir + ('%s_Guided_Grad_Cam_Swap.png' % index)), np.swapaxes(gd_gb[0], 0, 1))
+        cc1 = np.swapaxes(gd_gb[0], 0, 1)
+        scipy.misc.imsave((save_dir + ('%s_Guided_Grad_Cam_FlipUD.png' % index)), np.flipud(cc1))
+        scipy.misc.imsave((save_dir + ('%s_Guided_Grad_Cam_FlipLR.png' % index)), np.fliplr(cc1))
