@@ -2027,6 +2027,9 @@ class DenseUnet(DenseNet):
                 # Append this layer to the running list of dense connected layers
                 layers_concat.append(conv)
 
+            # Combine the layers
+            conv = tf.concat(layers_concat, axis=-1)
+
             if downsample: conv = self.transition_layer(conv, (layer_name+'_Downsample'), keep_prob)
 
             return conv, layers_concat
