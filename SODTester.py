@@ -1149,7 +1149,9 @@ class SODTester():
         # Generate guided backprop mask
         gb_viz = np.dstack((gb_viz[:, :, 0]))
         gb_viz -= np.min(gb_viz)
-        gb_viz /= gb_viz.max()
+        print (gb_viz.max())
+        # gb_viz /= gb_viz.max()
+        gb_viz /= np.amax(gb_viz)
         if display: self.display_single_image(gb_viz[0], False, ('Guided Backprop', gb_viz.shape))
 
         # Generate guided grad cam

@@ -7,10 +7,11 @@ It then contains functions to store the file as a protocol buffer
 
 """
 
-import glob, os, dicom, csv, random, cv2, math, pickle
-#import astra
+import glob, os, csv, random, cv2, math, pickle
+import astra
 
 import numpy as np
+import pydicom as dicom
 import nibabel as nib
 import tensorflow as tf
 import SimpleITK as sitk
