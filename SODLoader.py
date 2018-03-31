@@ -58,12 +58,15 @@ class SODLoader():
     """
 
 
-    def load_DICOM_3D(self, path, dtype=np.int16, overwrite_dims=513):
+    def load_DICOM_3D(self, path, dtype=np.int16, sort=False, overwrite_dims=513, display=False):
+
         """
         This function loads a DICOM folder and stores it into a numpy array. From Kaggle
         :param: path: The path of the DICOM folder
+        :param sort: Whether to sort through messy folders for the actual axial acquisition
         :param: overwrite_dims = In case slice dimensions can't be retreived, define overwrite dimensions here
         :param: dtype = what data type to save the image as
+        :param: display = Whether to display debug text
         :return: image = A 3D numpy array of the image
         :return: numpyorigin, the real world coordinates of the origin
         :return: numpyspacing: An array of the spacing of the CT scanner used
@@ -84,6 +87,8 @@ class SODLoader():
 
             # Populate an array with the dicom slices
             ndimage = [dicom.read_file(s) for s in filenames]
+
+        if sort: ndimage=self.sort_DICOMS(ndimage, display, path)
 
         # Sort the slices
         ndimage.sort(key=lambda x: int(x.ImagePositionPatient[2]))
@@ -2008,3 +2013,80 @@ class SODLoader():
             num += 1
 
         print('Mean %s, Std: %s' % ((mean / num), (std / num)))
+
+
+    def sort_DICOMS(self, ndimage, display=False, path=None):
+
+        """
+        Sorts through messy DICOM folders and retreives axial original acquisitions
+        :param ndimage: The loaded DICOM volume
+        :param display: Whether to display debugging text
+        :param path: Path to the original folder, for debug text
+        :return: real: the desired actual images
+        """
+
+        # Try saving only the original primary axial series. Use an ID to make sure to save only one series. Skip MIPS
+        real, this_ID = [], None
+
+        for z in range(len(ndimage)):
+            # Try statement to skip non DICOM slices
+            try:
+
+                # First make sure some fields are in like Axial. Then make sure to skip some fields like MIP
+                if ('ORIGINAL' not in ndimage[z].ImageType) or ('PRIMARY' not in ndimage[z].ImageType) or ('AXIAL' not in ndimage[z].ImageType): continue
+                if ('MIP' in ndimage[z].ImageType) or ('SECONDARY' in ndimage[z].ImageType) or ('LOCALIZER' in ndimage[z].ImageType) or ('REFORMATTED' in ndimage[z].ImageType): continue
+
+                # Make Sure identification matches or is null then add to the volume
+                if this_ID == None or this_ID == ndimage[z].ImageType:
+                    this_ID = ndimage[z].ImageType
+                    real.append(ndimage[z])
+
+            except:
+                continue
+
+        # No original series must exist if this following try statement fails, load a derived primary axial instead
+        try:
+            if real[0].ImageType == 0: pass
+        except:
+
+            # Save only the original axial, use ID to save one series only
+            this_ID = None
+            for z in range(len(ndimage)):
+                # Try statement to skip non DICOM slices
+                try:
+
+                    # First make sure some fields are in like Axial. Then make sure to skip some fields like MIP
+                    if ('PRIMARY' not in ndimage[z].ImageType) or ('AXIAL' not in ndimage[z].ImageType): continue
+                    if ('MIP' in ndimage[z].ImageType) or ('SECONDARY' in ndimage[z].ImageType) or ('LOCALIZER' in ndimage[z].ImageType) or ('REFORMATTED' in ndimage[z].ImageType): continue
+
+                    # Make sure Id matches or is empty then add
+                    if this_ID == None or this_ID == ndimage[z].ImageType:
+                        this_ID = ndimage[z].ImageType
+                        real.append(ndimage[z])
+
+                except:
+                    continue
+
+        # Display if desired
+        if display:
+            if real[0].ImageType != ['ORIGINAL', 'PRIMARY', 'AXIAL'] or len(real) >= 500:
+
+                print("\nFiles for patient: ", path)
+                last, track = None, []
+                for z in range(len(ndimage)):
+                    try:
+                        if ndimage[z].ImageType != last and ndimage[z].ImageType not in track:
+                            print(ndimage[z].ImageType)
+                            last = ndimage[z].ImageType
+                            track.append(ndimage[z].ImageType)
+                    except:
+                        continue
+
+                try:
+                    print(len(real), ' real slices, description = ', real[0].ImageType)
+                except:
+                    print('Unable to load!!')
+
+        return real
+
+
