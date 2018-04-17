@@ -1364,8 +1364,8 @@ class SODMatrix(object):
 
     def MSE_loss(self, logits, labels, mask_factor=0.0, mask_avg=0.0, mask_norm=0.0, debug=False):
         """
-        Calculates the mean squared error, made for boneAge linear regressor output.
-        :param logits: not really logits but outputs of the network
+        Calculates the mean squared error for linear regression
+        :param logits: network outputs
         :param labels: actual values
         :param mask_factor:
         :param mask_avg:
