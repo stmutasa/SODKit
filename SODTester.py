@@ -712,7 +712,6 @@ class SODTester():
 
         # Transpose the data frame
         if transpose: df.transpose()
-        df.
 
         # Append if the flag is determined
         if append:
