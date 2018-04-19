@@ -711,7 +711,7 @@ class SODTester():
         df = pd.DataFrame(dictionary)
 
         # Transpose the data frame
-        if transpose: df = df.set_index(index_name).T
+        if transpose: df = df.T
 
         # Append if the flag is determined
         if append:
