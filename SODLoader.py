@@ -888,6 +888,29 @@ class SODLoader():
         return image, new_spacing
 
 
+    def resize_volume(self, image, dtype, x=256, y=256, z=None):
+
+        """
+        Resize a volume to the new size
+        :param image: input image array
+        :param dtype: the data type of the input
+        :param x: new x dimensino
+        :param y:
+        :param z: new z dimension
+        :return:
+        """
+
+        # Resize the array
+        if not z: z=image.shape[0]
+        resize = np.zeros((z, x, y), dtype)
+
+        # Slice by slice zoom
+        for idx in range(image.shape[0]): resize[idx] = self.zoom_2D(image[idx], [x, y])
+
+        # Return
+        return resize
+
+
     def zoom_3D(self, volume, factor):
         """
         Uses scipy to zoom a 3D volume to a new shape
@@ -1373,6 +1396,43 @@ class SODLoader():
                 return (slice - np.mean(slice)) / np.std(slice)
 
         return (input - np.mean(input)) / np.std(input)
+
+
+    def normalize_MRI_histogram(self, image, return_values=False):
+        """
+        Uses histogram normalization to normalize MRI data by removing 0 values
+        :param image: input volume numpy array
+        :param return_values: Whether to return the mean, std and mode values as well
+        :return:
+        """
+
+        # First calculate the most commonly occuring values in the volume
+        occurences, values = np.histogram(image, bins=500)
+
+        # Remove 0 values (AIR) which always win
+        occurences, values = occurences[1:], values[1:]
+
+        # The mode is the value array at the index of highest occurence
+        mode = values[np.argmax(occurences)]
+
+        # Make dummy no zero image array to calculate STD
+        dummy, img_temp = [], image.flatten()
+        for z in range(len(img_temp)):
+            if img_temp[z] > 5: dummy.append(img_temp[z])
+
+        # Recenter the image and nonzero values
+        image = image.astype(np.float32) - mode
+        dummy = np.asarray(dummy, np.float32) - mode
+
+        # Mean is calculated from nonzero values only, std from nonzero centered values
+        std, mean = np.std(dummy), np.mean(dummy)
+
+        # Now divide the image by the modified STD
+        image /= std
+
+        # Return values or just volume
+        if return_values: return image, mean, std, mode
+        else: return image
 
 
     def display_overlay(self, img, mask):
