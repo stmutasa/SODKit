@@ -93,16 +93,12 @@ class SODLoader():
         ndimage.sort(key=lambda x: int(x.ImagePositionPatient[2]))
 
         # Retreive slice thickness by subtracting the real world location of the first two slices
-        try:
-            slice_thickness = np.abs(ndimage[0].ImagePositionPatient[2] - ndimage[1].ImagePositionPatient[2])
-        except:
-            slice_thickness = np.abs(ndimage[0].SliceLocation - ndimage[1].SliceLocation)
+        try: slice_thickness = np.abs(ndimage[0].ImagePositionPatient[2] - ndimage[1].ImagePositionPatient[2])
+        except: slice_thickness = np.abs(ndimage[0].SliceLocation - ndimage[1].SliceLocation)
 
         # Retreive the dimensions of the scan
-        try:
-            dims = np.array([int(ndimage[0].Columns), int(ndimage[0].Rows)])
-        except:
-            dims = np.array([overwrite_dims, overwrite_dims])
+        try: dims = np.array([int(ndimage[0].Columns), int(ndimage[0].Rows)])
+        except: dims = np.array([overwrite_dims, overwrite_dims])
 
         # Retreive the spacing of the pixels in the XY dimensions
         pixel_spacing = ndimage[0].PixelSpacing
@@ -124,21 +120,21 @@ class SODLoader():
 
         # Convert to Houndsfield units
         try:
-            for sl in range(len(ndimage)):
 
-                # retreive the slope and intercept of this slice
-                slope = ndimage[sl].RescaleSlope
-                intercept = ndimage[sl].RescaleIntercept
+            # retreive the slope and intercept of this slice
+            slope = ndimage[0].RescaleSlope
+            intercept = ndimage[0].RescaleIntercept
 
-                # If the slope isn't 1, rescale the images using the slope
-                if slope != 1:
-                    image[sl] = slope * image[sl].astype(np.float64)
-                    image[sl] = image[sl].astype(dtype)
+            # If the slope isn't 1, rescale the images using the slope
+            if slope != 1:
+                image = slope * image.astype(np.float64)
+                image = image.astype(dtype)
 
-                # Reset the Intercept
-                image[sl] += dtype(intercept)
+            # Reset the Intercept
+            image += dtype(intercept)
 
-        except: pass
+        except:
+            pass
 
         return image, numpyOrigin, numpySpacing, dims
 
@@ -1559,6 +1555,26 @@ class SODLoader():
         if plot: plt.show()
 
 
+    def display_histogram(self, input_image, x_label, y_label ='Frequency', display=False, bins=50, color='c'):
+
+        """
+        Plots a histogram summary
+        :param input_image: The input volume or image, numpy array
+        :param x_label: Label for x axis
+        :param y_label: Y axis label
+        :param display: whether to show the plot now
+        :param bins: How many different bins to plot
+        :param color: Color
+        :return:
+        """
+
+        # Create figure and a subplot
+        fig, ax = plt.subplots()
+
+        ax.hist(input_image.flatten(), bins=bins, color=color)
+        if display: plt.show()
+
+
     def generate_image_text_overlay(self, text, image, dim_3d=False, color=1.0, scale=0.5, thickness=1):
         """
         This function displays text over an image
@@ -2025,19 +2041,24 @@ class SODLoader():
         """
 
         # Try saving only the original primary axial series. Use an ID to make sure to save only one series. Skip MIPS
-        real, this_ID = [], None
+        real, this_ID, this_series = [], None, None
 
         for z in range(len(ndimage)):
             # Try statement to skip non DICOM slices
             try:
 
-                # First make sure some fields are in like Axial. Then make sure to skip some fields like MIP
+                # First make sure some fields are in like Axial. Then make sure to skip some fields like MIP.
                 if ('ORIGINAL' not in ndimage[z].ImageType) or ('PRIMARY' not in ndimage[z].ImageType) or ('AXIAL' not in ndimage[z].ImageType): continue
                 if ('MIP' in ndimage[z].ImageType) or ('SECONDARY' in ndimage[z].ImageType) or ('LOCALIZER' in ndimage[z].ImageType) or ('REFORMATTED' in ndimage[z].ImageType): continue
 
+                # Make sure to skip lung or bone windows. Also skip non cons and non chest studies
+                if ('BONE' in ndimage[z].SeriesDescription) or ('LUNG' in ndimage[z].SeriesDescription): continue
+                if ('CHEST' not in ndimage[z].StudyDescription) or ('WITHOUT' in ndimage[z].SeriesDescription): continue
+
                 # Make Sure identification matches or is null then add to the volume
-                if this_ID == None or this_ID == ndimage[z].ImageType:
+                if (this_ID == None or this_ID == ndimage[z].ImageType) and (this_series == None or this_series == ndimage[z].SeriesDescription):
                     this_ID = ndimage[z].ImageType
+                    this_series = ndimage[z].SeriesDescription
                     real.append(ndimage[z])
 
             except:
@@ -2058,9 +2079,14 @@ class SODLoader():
                     if ('PRIMARY' not in ndimage[z].ImageType) or ('AXIAL' not in ndimage[z].ImageType): continue
                     if ('MIP' in ndimage[z].ImageType) or ('SECONDARY' in ndimage[z].ImageType) or ('LOCALIZER' in ndimage[z].ImageType) or ('REFORMATTED' in ndimage[z].ImageType): continue
 
-                    # Make sure Id matches or is empty then add
-                    if this_ID == None or this_ID == ndimage[z].ImageType:
+                    # Make sure to skip lung or bone windows. Also skip non cons and non chest studies
+                    if ('BONE' in ndimage[z].SeriesDescription) or ('LUNG' in ndimage[z].SeriesDescription): continue
+                    if ('CHEST' not in ndimage[z].StudyDescription) or ('WITHOUT' in ndimage[z].SeriesDescription): continue
+
+                    # Make Sure identification matches or is null then add to the volume
+                    if (this_ID == None or this_ID == ndimage[z].ImageType) and (this_series == None or this_series == ndimage[z].SeriesDescription):
                         this_ID = ndimage[z].ImageType
+                        this_series = ndimage[z].SeriesDescription
                         real.append(ndimage[z])
 
                 except:
@@ -2087,5 +2113,3 @@ class SODLoader():
                     print('Unable to load!!')
 
         return real
-
-
