@@ -23,27 +23,27 @@ class SODTester():
     SOD Tester class is a class for testing the performance of our network
     """
 
-    # Linear regression variables
-    MAE = 0
-    best_MAE = 10
-    accuracy = 0
-
-    # Classification variables
-    TP, FP, TN, FN = 0, 0, 0, 0
-    sensitiviy, specificity = 0, 0
-    PPV, NPV = 0, 0
-    F1_score, AUC = 0, 0
-    roc_auc, fpr, tpr = {}, {}, {}
-
-    # Other variables
-    right, total, calls = 0, 0, 0
-    best_step, num_classes = 0, 0
-
     def __init__(self, binary, regression):
 
         # Define whether this is a binary, multiclass or linear regression model
         self.binary = binary
         self.regression = regression
+
+        # Linear regression variables
+        self.MAE = 0
+        self.best_MAE = 10
+        self.accuracy = 0
+
+        # Classification variables
+        self.TP, self.FP, self.TN, self.FN = 0, 0, 0, 0
+        self.sensitiviy, self.specificity = 0, 0
+        self.PPV, self.NPV = 0, 0
+        self.F1_score, self.AUC = 0, 0
+        self.roc_auc, self.fpr, self.tpr = {}, {}, {}
+
+        # Other variables
+        self.right, self.total, self.calls = 0, 0, 0
+        self.best_step, self.num_classes = 0, 0
 
     """
      Performance Metrics
@@ -696,13 +696,14 @@ class SODTester():
         return np.eye(int(n_classes))[labels.astype(np.int16)]
 
 
-    def save_dic_csv(self, dictionary, filename='Submission', append=False, transpose=True):
+    def save_dic_csv(self, dictionary, filename='Submission', append=False, transpose=True, index_name='Example'):
         """
         Saves a ready made dictionary to CSV
         :param dictionary: the input dictionary
         :param filename: filename to save
         :param append: whether to append an existing csv or make a new one
         :param transpose: whether to transpose the dictionary
+        :param index_name: the name of the title index
         :return:
         """
 
@@ -710,14 +711,14 @@ class SODTester():
         df = pd.DataFrame(dictionary)
 
         # Transpose the data frame
-        if transpose: df.transpose()
+        if transpose: df = df.T
 
         # Append if the flag is determined
         if append:
             with open(filename, 'a') as f:  df.to_csv(f, index=True, index_label='Batch_Num', header=False)
 
         # Otherwise make a new CSV
-        else: df.to_csv(filename, index=True, index_label='Lymph_Node', )
+        else: df.to_csv(filename, index=True, index_label=index_name, )
 
 
     def save_to_csv(self, patients, predictions, step, error, filename='submission'):
