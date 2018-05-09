@@ -62,7 +62,7 @@ class SODLoader():
         """
         This function loads a DICOM folder and stores it into a numpy array. From Kaggle
         :param: path: The path of the DICOM folder
-        :param sort: Whether to sort through messy folders for the actual axial acquisition
+        :param sort: Whether to sort through messy folders for the actual axial primary acquisition
         :param: overwrite_dims = In case slice dimensions can't be retreived, define overwrite dimensions here
         :param: dtype = what data type to save the image as
         :param: display = Whether to display debug text
@@ -87,6 +87,7 @@ class SODLoader():
             # Populate an array with the dicom slices
             ndimage = [dicom.read_file(s) for s in filenames]
 
+        # Run if we need to find the actual axial primary acquisition
         if sort: ndimage=self.sort_DICOMS(ndimage, display, path)
 
         # Sort the slices
