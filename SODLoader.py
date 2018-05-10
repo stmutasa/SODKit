@@ -7,8 +7,8 @@ It then contains functions to store the file as a protocol buffer
 
 """
 
-import glob, os, csv, random, cv2, math, pickle
-#import astra
+import glob, os, csv, random, cv2, math, pickle, mudicom
+import astra
 
 import numpy as np
 import pydicom as dicom
@@ -57,7 +57,7 @@ class SODLoader():
     """
 
 
-    def load_DICOM_3D(self, path, dtype=np.int16, sort=False, overwrite_dims=513, display=False):
+    def load_DICOM_3D(self, path, dtype=np.int16, sort=False, overwrite_dims=513, display=False, return_header=False):
 
         """
         This function loads a DICOM folder and stores it into a numpy array. From Kaggle
@@ -66,35 +66,23 @@ class SODLoader():
         :param: overwrite_dims = In case slice dimensions can't be retreived, define overwrite dimensions here
         :param: dtype = what data type to save the image as
         :param: display = Whether to display debug text
+        :param return_header = whether to return the header dictionary
         :return: image = A 3D numpy array of the image
         :return: numpyorigin, the real world coordinates of the origin
         :return: numpyspacing: An array of the spacing of the CT scanner used
         :return: spacing: The spacing of the pixels in millimeters
+        :return header: a dictionary of the file's header information
         """
 
-        # First try for files without the DICM marker
-        try:
-
-            # Populate an array with the dicom slices
-            ndimage = [dicom.read_file(path + '/' + s) for s in os.listdir(path)]
-
-        # Otherwise they have the marker
-        except:
-
-            # Find all the .dcm files
-            filenames = glob.glob(path + '/' + '*.dcm')
-
-            # Populate an array with the dicom slices
-            ndimage = [dicom.read_file(s) for s in filenames]
-
-        if sort: ndimage=self.sort_DICOMS(ndimage, display, path)
+        # Some DICOMs end in .dcm, others do not
+        if path[-3:] != 'dcm': fnames = [path + '/' + s for s in os.listdir(path) if s[-3:].lower() == 'dcm']
+        else: fnames = [path]
 
         # Sort the slices
+        ndimage = [dicom.read_file(path, force=True) for path in fnames]
+        if sort: ndimage = self.sort_DICOMS(ndimage, display, path)
+        ndimage, fnames, orientation, st, shape, four_d = self.sort_dcm(ndimage, fnames)
         ndimage.sort(key=lambda x: int(x.ImagePositionPatient[2]))
-
-        # Retreive slice thickness by subtracting the real world location of the first two slices
-        try: slice_thickness = np.abs(ndimage[0].ImagePositionPatient[2] - ndimage[1].ImagePositionPatient[2])
-        except: slice_thickness = np.abs(ndimage[0].SliceLocation - ndimage[1].SliceLocation)
 
         # Retreive the dimensions of the scan
         try: dims = np.array([int(ndimage[0].Columns), int(ndimage[0].Rows)])
@@ -104,7 +92,7 @@ class SODLoader():
         pixel_spacing = ndimage[0].PixelSpacing
 
         # Create spacing matrix
-        numpySpacing = np.array([slice_thickness, float(pixel_spacing[0]), float(pixel_spacing[1])])
+        numpySpacing = np.array([st, float(pixel_spacing[0]), float(pixel_spacing[1])])
 
         # Retreive the origin of the scan
         orig = ndimage[0].ImagePositionPatient
@@ -112,31 +100,31 @@ class SODLoader():
         # Make a numpy array of the origin
         numpyOrigin = np.array([float(orig[2]), float(orig[0]), float(orig[1])])
 
+        # --- Save first slice for header information
+        header = {'orientation': orientation, 'slices': shape[1], 'channels': shape[0],
+                  'fnames': fnames, 'tags': ndimage[0], '4d': four_d}
+
         # Finally, make the image actually equal to the pixel data and not the header
-        image = np.stack([s.pixel_array for s in ndimage])
+        try: image = np.stack([self.read_dcm_uncompressed(s) for s in ndimage])
+        except: image = np.stack([self.read_dcm_compressed(f) for f in fnames])
+
+        image = self.compress_bits(image)
 
         # Set image data type to the type specified
         image = image.astype(dtype)
 
         # Convert to Houndsfield units
-        try:
+        if hasattr(ndimage[0], 'RescaleIntercept') and hasattr(ndimage[0], 'RescaleSlope'):
+            for slice_number in range(len(ndimage)):
+                intercept = ndimage[slice_number].RescaleIntercept
+                slope = ndimage[slice_number].RescaleSlope
 
-            # retreive the slope and intercept of this slice
-            slope = ndimage[0].RescaleSlope
-            intercept = ndimage[0].RescaleIntercept
+                image[slice_number] = slope * image[slice_number].astype(np.float64)
+                image[slice_number] = image[slice_number].astype('int16')
+                image[slice_number] += np.int16(intercept)
 
-            # If the slope isn't 1, rescale the images using the slope
-            if slope != 1:
-                image = slope * image.astype(np.float64)
-                image = image.astype(dtype)
-
-            # Reset the Intercept
-            image += dtype(intercept)
-
-        except:
-            pass
-
-        return image, numpyOrigin, numpySpacing, dims
+        if return_header: return image, numpyOrigin, numpySpacing, dims, header
+        else: return image, numpyOrigin, numpySpacing, dims
 
 
     def load_nrrd_3D(self, path, dtype=np.int16):
@@ -2131,9 +2119,16 @@ class SODLoader():
 
             # Save only the original axial, use ID to save one series only
             this_ID = None
+            test_ID = []
             for z in range(len(ndimage)):
                 # Try statement to skip non DICOM slices
                 try:
+
+                    # TODO: Testing
+                    string_test = ('%s, + %s' %(ndimage[z].ImageType, ndimage[z].SeriesDescription))
+                    if string_test not in test_ID:
+                        print (string_test)
+                        test_ID.append(string_test)
 
                     # First make sure some fields are in like Axial. Then make sure to skip some fields like MIP
                     if ('PRIMARY' not in ndimage[z].ImageType) or ('AXIAL' not in ndimage[z].ImageType): continue
@@ -2141,7 +2136,7 @@ class SODLoader():
 
                     # Make sure to skip lung or bone windows. Also skip non cons and non chest studies
                     if ('BONE' in ndimage[z].SeriesDescription) or ('LUNG' in ndimage[z].SeriesDescription): continue
-                    if ('CHEST' not in ndimage[z].StudyDescription) or ('WITHOUT' in ndimage[z].SeriesDescription): continue
+                    if ('ABDOMEN' in ndimage[z].StudyDescription) or ('WITHOUT' in ndimage[z].SeriesDescription) or ('PELVIS' in ndimage[z].StudyDescription): continue
 
                     # Make Sure identification matches or is null then add to the volume
                     if (this_ID == None or this_ID == ndimage[z].ImageType) and (this_series == None or this_series == ndimage[z].SeriesDescription):
@@ -2152,7 +2147,7 @@ class SODLoader():
                 except:
                     continue
 
-        # Display if desired
+        # Display if desired Negative_40556267_April2017_0
         if display:
             if real[0].ImageType != ['ORIGINAL', 'PRIMARY', 'AXIAL'] or len(real) >= 500:
 
@@ -2173,3 +2168,116 @@ class SODLoader():
                     print('Unable to load!!')
 
         return real
+
+    def read_dcm_uncompressed(self, s):
+
+        """
+        Method to load single dicom pixel array
+
+        """
+        image = s.pixel_array
+
+        if hasattr(s, 'Rows') and hasattr(s, 'Columns'):
+            if image.shape[0] != s.Rows:
+                image = image.reshape(s.Rows, s.Columns)
+
+        return image
+
+    def read_dcm_compressed(self, fname):
+        """
+        Method to load single compressed dicom file with mudicom
+
+        """
+        mu = mudicom.load(fname)
+        img = mu.image.numpy
+
+        header = mu.read()
+        header = dict([(h.name, h.value) for h in header])
+
+        if 'Rows' in header and 'Columns' in header:
+            if img.shape[0] != header['Rows']:
+                img = img.reshape(int(header['Rows']), int(header['Columns']))
+
+        return img.astype('int16')
+
+
+    def compress_bits(self, vol):
+        """
+        Method to ensure image is at most signed 16-bit integer
+
+        """
+        m = np.max(np.abs(vol))
+        dtype = np.equal(np.mod(vol, 1), 0).all()
+        dtype = 'int' if dtype else 'float'
+
+        # --- Convert integers
+        if dtype == 'int':
+            if m < 255:
+                return vol.astype('uint8')
+            elif m < 32768:
+                return vol.astype('int16')
+            else:
+                vol = vol.astype('float64') * (32768 / m)
+                return vol.astype('int16')
+
+        # --- Convert floats
+        if dtype == 'float':
+            return vol.astype('float16')
+
+
+    def sort_dcm(self, slices, fnames, verbose=False):
+        """
+        Method to sort DICOM objects by ImagePositionPatient
+        """
+        # --- Sort by instance
+        slices_instance = [s for s in slices if hasattr(s, 'InstanceNumber')]
+        if len(slices_instance) > int(len(slices) / 2):
+            slices = slices_instance
+            inns = np.array([int(s.InstanceNumber) for s in slices])
+            indices = np.argsort(inns)
+            slices = [slices[i] for i in indices]
+            fnames = [fnames[i] for i in indices]
+
+        # --- Determine orientation
+        slices = [s for s in slices if hasattr(s, 'ImagePositionPatient')]
+        ipps = np.array([s.ImagePositionPatient for s in slices])
+        assert ipps.shape[1] == 3
+        diff = []
+        for ax in range(3):
+            diff.append(np.max(ipps[:, ax]) - np.min(ipps[:, ax]))
+        diff_max = np.argmax(diff)
+        orient_key = {
+            0: 'SAG',
+            1: 'COR',
+            2: 'AXI'}
+
+        indices = np.argsort(ipps[:, diff_max].ravel())
+
+        # --- Determine interleave pattern
+        ipps = ipps[:, diff_max]
+        u = np.unique(ipps)
+        shape = [1, ipps.size]  # output shape in [channels x Z]
+
+        four_d = ipps.size > u.size
+        if four_d:
+            if ipps.size % u.size == 0:
+                n = int(ipps.size / u.size)
+                indices = np.concatenate([np.sort(indices[i * n:(i + 1) * n]) for i in range(u.size)])
+                indices = np.concatenate([indices[i::n] for i in range(n)])
+                shape = [n, u.size]  # output shape in [channels x Z]
+            else:
+                if verbose:
+                    print('Warning: 4D volume seems to be missing data within a channel (%s)' % os.path.dirname(fnames[0]))
+
+        slices = [slices[i] for i in indices]
+        fnames = [fnames[i] for i in indices]
+
+        # --- Determine slice thickness
+        if ipps.shape[0] > 1:
+            st = np.sort(ipps.ravel())
+            st = st[1:] - st[:-1]
+            st = st[st > 0]
+            st = np.sort(st)
+            st = st[int(st.size / 2)]
+
+        return slices, fnames, orient_key[diff_max], st, shape, four_d
