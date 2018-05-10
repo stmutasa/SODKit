@@ -1,3 +1,6 @@
+README IS OUT OF DATE
+But you can still use it as an example of what functions are available
+
 # SODKit
 Helper classes
    """
