@@ -2090,10 +2090,16 @@ class SODLoader():
 
         # Try saving only the original primary axial series. Use an ID to make sure to save only one series. Skip MIPS
         real, this_ID, this_series = [], None, None
-
+        test_ID = None
         for z in range(len(ndimage)):
             # Try statement to skip non DICOM slices
             try:
+
+                # TODO: Testing
+                string_test = ('%s, + %s' % (ndimage[z].ImageType, ndimage[z].SeriesDescription))
+                if string_test not in test_ID:
+                    print(string_test)
+                    test_ID.append(string_test)
 
                 # First make sure some fields are in like Axial. Then make sure to skip some fields like MIP.
                 if ('ORIGINAL' not in ndimage[z].ImageType) or ('PRIMARY' not in ndimage[z].ImageType) or ('AXIAL' not in ndimage[z].ImageType): continue
@@ -2101,7 +2107,7 @@ class SODLoader():
 
                 # Make sure to skip lung or bone windows. Also skip non cons and non chest studies
                 if ('BONE' in ndimage[z].SeriesDescription) or ('LUNG' in ndimage[z].SeriesDescription): continue
-                if ('CHEST' not in ndimage[z].StudyDescription) or ('WITHOUT' in ndimage[z].SeriesDescription): continue
+                if ('ABDOMEN' in ndimage[z].StudyDescription) or ('WITHOUT' in ndimage[z].SeriesDescription) or ('PELVIS' in ndimage[z].StudyDescription): continue
 
                 # Make Sure identification matches or is null then add to the volume
                 if (this_ID == None or this_ID == ndimage[z].ImageType) and (this_series == None or this_series == ndimage[z].SeriesDescription):
