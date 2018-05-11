@@ -2114,7 +2114,7 @@ class SODLoader():
                     this_series = ndimage[z].SeriesDescription
                     real.append(ndimage[z])
                     if not test_ID:
-                        print ('Win on try 1: ', end = '')
+                        if display: print ('Win on try 1: ', this_series, end = '')
                         test_ID = True
 
             except: continue
@@ -2145,7 +2145,7 @@ class SODLoader():
                         this_series = ndimage[z].SeriesDescription
                         real.append(ndimage[z])
                         if not test_ID:
-                            print('Win on try 2 ', real[0].ImageType, end='')
+                            if display: print('Win on try 2: ', this_series, end='')
                             test_ID = True
 
                 except: continue
@@ -2176,7 +2176,7 @@ class SODLoader():
                         this_series = ndimage[z].SeriesDescription
                         real.append(ndimage[z])
                         if not test_ID:
-                            print('Win on try 3 ', real[0].ImageType, end='')
+                            if display: print('Win on try 3: ', this_series, end='')
                             test_ID = True
 
                 except: continue
