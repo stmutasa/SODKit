@@ -2081,99 +2081,108 @@ class SODLoader():
     def sort_DICOMS(self, ndimage, display=False, path=None):
 
         """
-        Sorts through messy DICOM folders and retreives axial original acquisitions
+        Sorts through messy DICOM folders and retreives axial original acquisitions of PE studies
         :param ndimage: The loaded DICOM volume
         :param display: Whether to display debugging text
         :param path: Path to the original folder, for debug text
         :return: real: the desired actual images
         """
 
+        # First define some values in the DICOM header that indicate files we want to skip
+        desired_ImageTypes = ['PRIMARY', 'AXIAL', 'ORIGINAL']
+        skipped_ImageTypes = ['MIP', 'SECONDARY', 'LOCALIZER', 'REFORMATTED']
+        skipped_Descriptions = ['BONE', 'LUNG', 'WITHOUT', 'TRACKER', 'SMART PREP', 'MONITORING', 'LOCATOR']
+        skipped_Studies = ['ABDOMEN', 'PELVIS']
+
         # Try saving only the original primary axial series. Use an ID to make sure to save only one series. Skip MIPS
-        real, this_ID, this_series = [], None, None
-        test_ID = None
+        real, this_ID, this_series, test_ID = [], None, None, None
         for z in range(len(ndimage)):
+
             # Try statement to skip non DICOM slices
             try:
 
-                # TODO: Testing
-                string_test = ('%s, + %s' % (ndimage[z].ImageType, ndimage[z].SeriesDescription))
-                if string_test not in test_ID:
-                    print(string_test)
-                    test_ID.append(string_test)
-
-                # First make sure some fields are in like Axial. Then make sure to skip some fields like MIP.
+                # Skip the things we want to skip
                 if ('ORIGINAL' not in ndimage[z].ImageType) or ('PRIMARY' not in ndimage[z].ImageType) or ('AXIAL' not in ndimage[z].ImageType): continue
-                if ('MIP' in ndimage[z].ImageType) or ('SECONDARY' in ndimage[z].ImageType) or ('LOCALIZER' in ndimage[z].ImageType) or ('REFORMATTED' in ndimage[z].ImageType): continue
-
-                # Make sure to skip lung or bone windows. Also skip non cons and non chest studies
-                if ('BONE' in ndimage[z].SeriesDescription) or ('LUNG' in ndimage[z].SeriesDescription): continue
-                if ('ABDOMEN' in ndimage[z].StudyDescription) or ('WITHOUT' in ndimage[z].SeriesDescription) or ('PELVIS' in ndimage[z].StudyDescription): continue
+                if any(text in ndimage[z].ImageType for text in skipped_ImageTypes): continue
+                if any(text in ndimage[z].SeriesDescription.upper() for text in skipped_Descriptions): continue
+                if any(text in ndimage[z].StudyDescription.upper() for text in skipped_Studies): continue
+                if len(ndimage[z].SeriesDescription) == 0: continue
 
                 # Make Sure identification matches or is null then add to the volume
                 if (this_ID == None or this_ID == ndimage[z].ImageType) and (this_series == None or this_series == ndimage[z].SeriesDescription):
                     this_ID = ndimage[z].ImageType
                     this_series = ndimage[z].SeriesDescription
                     real.append(ndimage[z])
+                    if not test_ID:
+                        print ('Win on try 1: ', end = '')
+                        test_ID = True
 
-            except:
-                continue
+            except: continue
 
         # No original series must exist if this following try statement fails, load a derived primary axial instead
-        try:
-            if real[0].ImageType == 0: pass
+        try: print (real[0].ImageType, end='')
         except:
 
             # Save only the original axial, use ID to save one series only
-            this_ID = None
-            test_ID = []
+            del real
+            real, this_ID, this_series, test_ID = [], None, None, None
+            if display: print ('First attempt to load DICOM failed, trying with less strict requirements')
             for z in range(len(ndimage)):
+
                 # Try statement to skip non DICOM slices
                 try:
 
-                    # TODO: Testing
-                    string_test = ('%s, + %s' %(ndimage[z].ImageType, ndimage[z].SeriesDescription))
-                    if string_test not in test_ID:
-                        print (string_test)
-                        test_ID.append(string_test)
-
-                    # First make sure some fields are in like Axial. Then make sure to skip some fields like MIP
+                    # Less strict on image type
                     if ('PRIMARY' not in ndimage[z].ImageType) or ('AXIAL' not in ndimage[z].ImageType): continue
-                    if ('MIP' in ndimage[z].ImageType) or ('SECONDARY' in ndimage[z].ImageType) or ('LOCALIZER' in ndimage[z].ImageType) or ('REFORMATTED' in ndimage[z].ImageType): continue
-
-                    # Make sure to skip lung or bone windows. Also skip non cons and non chest studies
-                    if ('BONE' in ndimage[z].SeriesDescription) or ('LUNG' in ndimage[z].SeriesDescription): continue
-                    if ('ABDOMEN' in ndimage[z].StudyDescription) or ('WITHOUT' in ndimage[z].SeriesDescription) or ('PELVIS' in ndimage[z].StudyDescription): continue
+                    if any(text in ndimage[z].ImageType for text in skipped_ImageTypes): continue
+                    if any(text in ndimage[z].SeriesDescription.upper() for text in skipped_Descriptions): continue
+                    if any(text in ndimage[z].StudyDescription.upper() for text in skipped_Studies): continue
+                    if len(ndimage[z].SeriesDescription) == 0: continue
 
                     # Make Sure identification matches or is null then add to the volume
                     if (this_ID == None or this_ID == ndimage[z].ImageType) and (this_series == None or this_series == ndimage[z].SeriesDescription):
                         this_ID = ndimage[z].ImageType
                         this_series = ndimage[z].SeriesDescription
                         real.append(ndimage[z])
+                        if not test_ID:
+                            print('Win on try 2 ', real[0].ImageType, end='')
+                            test_ID = True
 
-                except:
-                    continue
+                except: continue
 
-        # Display if desired Negative_40556267_April2017_0
-        if display:
-            if real[0].ImageType != ['ORIGINAL', 'PRIMARY', 'AXIAL'] or len(real) >= 500:
+        # At this point, we're up shit's creek
+        try: print (real[0].ImageType)
+        except:
 
-                print("\nFiles for patient: ", path)
-                last, track = None, []
-                for z in range(len(ndimage)):
-                    try:
-                        if ndimage[z].ImageType != last and ndimage[z].ImageType not in track:
-                            print(ndimage[z].ImageType)
-                            last = ndimage[z].ImageType
-                            track.append(ndimage[z].ImageType)
-                    except:
-                        continue
+            # Save only the original axial, use ID to save one series only
+            del real
+            real, this_ID, this_series, test_ID = [], None, None, None
+            skipped_Descriptions_shit = ['BONE', 'WITHOUT', 'TRACKER', 'SMART PREP', 'MONITORING']
+            if display: print('2nd attempt failed... up shits creek now...')
+            for z in range(len(ndimage)):
 
+                # Try statement to skip non DICOM slices
                 try:
-                    print(len(real), ' real slices, description = ', real[0].ImageType)
-                except:
-                    print('Unable to load!!')
+
+                    # Skip less image types, load lung windows if available, don't skip empty descriptions
+                    if ('ORIGINAL' not in ndimage[z].ImageType) or ('PRIMARY' not in ndimage[z].ImageType) or ('AXIAL' not in ndimage[z].ImageType): continue
+                    if any(text in ndimage[z].ImageType for text in skipped_ImageTypes): continue
+                    if any(text in ndimage[z].SeriesDescription.upper() for text in skipped_Descriptions_shit): continue
+                    if any(text in ndimage[z].StudyDescription for text in skipped_Studies): continue
+
+                    # Make Sure identification matches or is null then add to the volume
+                    if (this_ID == None or this_ID == ndimage[z].ImageType) and (this_series == None or this_series == ndimage[z].SeriesDescription):
+                        this_ID = ndimage[z].ImageType
+                        this_series = ndimage[z].SeriesDescription
+                        real.append(ndimage[z])
+                        if not test_ID:
+                            print('Win on try 3 ', real[0].ImageType, end='')
+                            test_ID = True
+
+                except: continue
 
         return real
+
 
     def read_dcm_uncompressed(self, s):
 
@@ -2188,6 +2197,7 @@ class SODLoader():
                 image = image.reshape(s.Rows, s.Columns)
 
         return image
+
 
     def read_dcm_compressed(self, fname):
         """
