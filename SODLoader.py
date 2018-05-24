@@ -8,8 +8,8 @@ It then contains functions to store the file as a protocol buffer
 """
 
 import glob, os, csv, random, cv2, math, pickle
-import mudicom
-import astra
+# import mudicom
+# import astra
 
 import numpy as np
 import pydicom as dicom
@@ -1389,11 +1389,12 @@ class SODLoader():
         return (input - np.mean(input)) / np.std(input)
 
 
-    def normalize_MRI_histogram(self, image, return_values=False):
+    def normalize_MRI_histogram(self, image, return_values=False, center_type='mode'):
         """
         Uses histogram normalization to normalize MRI data by removing 0 values
         :param image: input volume numpy array
         :param return_values: Whether to return the mean, std and mode values as well
+        :param center_type: What to center the data with, 'mean' or 'mode'
         :return:
         """
 
@@ -1407,18 +1408,17 @@ class SODLoader():
         mode = values[np.argmax(occurences)]
 
         # Make dummy no zero image array to calculate STD
-        dummy, img_temp = [], image.flatten()
+        dummy, img_temp = [], np.copy(image).flatten()
         for z in range(len(img_temp)):
             if img_temp[z] > 5: dummy.append(img_temp[z])
 
-        # Recenter the image and nonzero values
-        image = image.astype(np.float32) - mode
-        dummy = np.asarray(dummy, np.float32) - mode
-
-        # Mean is calculated from nonzero values only, std from nonzero centered values
+        # Mean/std is calculated from nonzero values only
+        dummy = np.asarray(dummy, np.float32)
         std, mean = np.std(dummy), np.mean(dummy)
 
         # Now divide the image by the modified STD
+        if center_type=='mode': image = image.astype(np.float32) - mode
+        else: image = image.astype(np.float32) - mean
         image /= std
 
         # Return values or just volume
@@ -1622,7 +1622,7 @@ class SODLoader():
         # Create figure and a subplot
         fig, ax = plt.subplots()
 
-        ax.hist(input_image.flatten(), bins=bins, color=color)
+        ax.hist(input_image.flatten(), bins=bins, color=color, )
         if display: plt.show()
 
 
