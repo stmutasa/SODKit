@@ -1389,7 +1389,7 @@ class SODLoader():
         return (input - np.mean(input)) / np.std(input)
 
 
-    def normalize_MRI_histogram(self, image, return_values=False, center_type='mode'):
+    def normalize_MRI_histogram(self, image, return_values=False, center_type='mean'):
         """
         Uses histogram normalization to normalize MRI data by removing 0 values
         :param image: input volume numpy array
