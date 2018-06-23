@@ -2285,24 +2285,25 @@ class ResNet(SODMatrix):
         self.summary = summary
 
 
-    def residual_block(self, input_x, nb_layers, layer_name, K, F=3, padding='SAME', downsample=True):
+    def residual_block(self, input_x, nb_layers, layer_name, K, F=3, padding='SAME', downsample=True, stanford=False):
 
         """
-
-        :param input_x:
-        :param nb_layers:
-        :param layer_name:
-        :param K:
-        :param F:
-        :param padding:
-        :param downsample:
+        Implements a block of residual layers at the same spatial dimension
+        :param input_x: Input, either from the last conv layer or the images
+        :param nb_layers: number of residual layers
+        :param layer_name: the baseline name of this block
+        :param K: feature map size
+        :param F: filter size
+        :param padding: SAME or VALID
+        :param downsample: Whether to downsample at the end
+        :param stanford: whether to use stanford style layers
         :return:
         """
 
         with tf.name_scope(layer_name):
 
             # The first layer of this block
-            conv = self.residual_layer((layer_name+'_res_0'), input_x)
+            conv = self.residual_layer((layer_name+'_res_0'), input_x, F, K, 1, padding, self.phase_train)
 
             # Loop through the number of layers desired
             for z in range(nb_layers):
@@ -2317,12 +2318,44 @@ class ResNet(SODMatrix):
             return conv
 
 
-    def define_network(self, input_images, block_layers=[], F=3, S_1=1, padding='SAME'):
+    def inception_block(self, input_x, nb_layers, layer_name, K, padding='SAME', downsample=True):
 
         """
-        Defines a residual network
+        Implements a block of inception layers at the same spatial dimension
+        :param input_x: Input, either from the last conv layer or the images
+        :param nb_layers: number of layers
+        :param layer_name: the baseline name of this block
+        :param F: filter size
+        :param padding: SAME or VALID
+        :param downsample: Whether to downsample at the end
+        :return:
+        """
+
+        with tf.name_scope(layer_name):
+
+            # The first layer of this block
+            conv = self.inception_layer((layer_name + '_inc_0'), input_x, K, 1, padding, self.phase_train)
+
+            # Loop through the number of layers desired
+            for z in range(nb_layers):
+
+                # Perform the desired operations
+                conv = self.inception_layer((layer_name + '_inc_' + str(z + 1)), conv, K, 1, padding, self.phase_train)
+
+            # Downsample if requested
+            if downsample:
+                conv = self.inception_layer((layer_name + '_inc_down_'), conv, K * 2, 2, padding, self.phase_train)
+
+            return conv
+
+
+    def define_network(self, input_images, block_layers=[], inception_layers=[], F=3, S_1=1, padding='SAME'):
+
+        """
+        Shortcut to creating a residual or residual-inception style network with just a few lines of code
         :param input_images: The input images
         :param block_layers: How many layers in each downsample block. i.e.: [2, 4, 6, ...] for 2 layers, then 4 etc
+        :param inception_layers: which block numbers to make inception layers: [0, 0, 1] makes the third block inception
         :param F: Filter sizes to use, default to 3
         :param S_1: Stride of the initial convolution: sometimes we don't want to downsample here
         :param padding: Padding to use, default ot 'SAME'
@@ -2347,9 +2380,14 @@ class ResNet(SODMatrix):
             if S_1 == 1: filters = self.filters * (2**z)
             else: filters = self.filters * (2**x)
 
-            # Generate a residual block, only downsample if not at the end
-            if x < self.nb_blocks: conv[x] = self.residual_block(conv[z], block_layers[z], 'Res_'+str(x), filters, F, padding, True)
-            else: conv[x] = self.residual_block(conv[z], block_layers[z], 'Res_'+str(x), filters, F, padding, False)
+            # Generate the appropriate block, only downsample if not at the end
+            if inception_layers[z]:
+                if x < self.nb_blocks: conv[x] = self.inception_block(conv[z], block_layers[z], 'Res_'+str(x), filters, padding, True)
+                else: conv[x] = self.inception_block(conv[z], block_layers[z], 'Res_'+str(x), filters, padding, False)
+
+            else:
+                if x < self.nb_blocks: conv[x] = self.residual_block(conv[z], block_layers[z], 'Res_'+str(x), filters, F, padding, True, False)
+                else: conv[x] = self.residual_block(conv[z], block_layers[z], 'Res_'+str(x), filters, F, padding, False, False)
 
         # Return final layer and array of conv block outputs
         return conv[-1], conv
