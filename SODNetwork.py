@@ -2269,3 +2269,87 @@ class DenseUnet(DenseNet):
 
         # Return final layer after batch norm and relu
         return tf.nn.relu(self.batch_normalization(deconv, self.phase_train, None))
+
+
+class ResNet(SODMatrix):
+
+
+    def __init__(self, nb_blocks, filters, sess, phase_train, summary):
+
+        # Variables accessible to only specific instances here:
+
+        self.nb_blocks = nb_blocks
+        self.filters = filters
+        self.sess = sess
+        self.phase_train = phase_train
+        self.summary = summary
+
+
+    def residual_block(self, input_x, nb_layers, layer_name, K, F=3, padding='SAME', downsample=True):
+
+        """
+
+        :param input_x:
+        :param nb_layers:
+        :param layer_name:
+        :param K:
+        :param F:
+        :param padding:
+        :param downsample:
+        :return:
+        """
+
+        with tf.name_scope(layer_name):
+
+            # The first layer of this block
+            conv = self.residual_layer((layer_name+'_res_0'), input_x)
+
+            # Loop through the number of layers desired
+            for z in range(nb_layers):
+
+                # Perform the desired operations
+                conv = self.residual_layer((layer_name+'_res_'+str(z+1)), conv, F, K, 1, padding, self.phase_train)
+
+            # Downsample if requested
+            if downsample:
+                conv = self.residual_layer((layer_name+'_res_down_'), conv, F, K*2, 2, padding, self.phase_train)
+
+            return conv
+
+
+    def define_network(self, input_images, block_layers=[], F=3, S_1=1, padding='SAME'):
+
+        """
+        Defines a residual network
+        :param input_images: The input images
+        :param block_layers: How many layers in each downsample block. i.e.: [2, 4, 6, ...] for 2 layers, then 4 etc
+        :param F: Filter sizes to use, default to 3
+        :param S_1: Stride of the initial convolution: sometimes we don't want to downsample here
+        :param padding: Padding to use, default ot 'SAME'
+        :return:
+                conv[-1]: the final conv layer
+                conv: the array of outputs from each block
+        """
+
+        # conv holds output of bottleneck layers (no BN/ReLU). Concat holds running lists of skip connections
+        conv = [None] * (self.nb_blocks + 1)
+
+        # Define the first layers before starting the Dense blocks
+        conv[0] = self.convolution('Conv1', input_images, F, self.filters, S_1, phase_train=self.phase_train)
+
+        # Loop through and make the downsample blocks
+        for z in range (self.nb_blocks):
+
+            # Z holds the prior index, X holds the current layer index
+            x = z+1
+
+            # Set filter size for this block
+            if S_1 == 1: filters = self.filters * (2**z)
+            else: filters = self.filters * (2**x)
+
+            # Generate a residual block, only downsample if not at the end
+            if x < self.nb_blocks: conv[x] = self.residual_block(conv[z], block_layers[z], 'Res_'+str(x), filters, F, padding, True)
+            else: conv[x] = self.residual_block(conv[z], block_layers[z], 'Res_'+str(x), filters, F, padding, False)
+
+        # Return final layer and array of conv block outputs
+        return conv[-1], conv
