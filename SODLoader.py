@@ -133,7 +133,7 @@ class SODLoader():
         Load a 3D nrrd file with header info
         :param path:
         :param dtype:
-        :return: image, origin, spacing
+        :return: image, origin, spacing,shape
         """
 
         # Load the file
@@ -305,7 +305,7 @@ class SODLoader():
             self.save_dict_pickle(pickle_dic, data_root)
 
 
-    def load_tfrecords(self, filenames, box_dims, image_dtype=tf.float32, channels=1, z_dim=None, segments=None, segments_dtype=tf.float32):
+    def load_tfrecords(self, filenames, box_dims, image_dtype=tf.float32, channels=1, z_dim=None, segments='label_data', segments_dtype=tf.float32):
 
         """
         Function to load a tfrecord protobuf. numpy arrays (volumes) should have 'data' in them.
