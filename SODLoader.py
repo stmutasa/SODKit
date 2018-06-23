@@ -8,8 +8,7 @@ It then contains functions to store the file as a protocol buffer
 """
 
 import glob, os, csv, random, cv2, math, pickle
-# import mudicom
-# import astra
+#import mudicom, astra
 
 import numpy as np
 import pydicom as dicom
