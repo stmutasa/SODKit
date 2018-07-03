@@ -2274,11 +2274,12 @@ class DenseUnet(DenseNet):
 class ResNet(SODMatrix):
 
 
-    def __init__(self, nb_blocks, filters, sess, phase_train, summary):
+    def __init__(self, nb_blocks, filters, images, sess, phase_train, summary):
 
         # Variables accessible to only specific instances here:
 
         self.nb_blocks = nb_blocks
+        self.images = images
         self.filters = filters
         self.sess = sess
         self.phase_train = phase_train
@@ -2349,7 +2350,7 @@ class ResNet(SODMatrix):
             return conv
 
 
-    def define_network(self, input_images, block_layers=[], inception_layers=[], F=3, S_1=1, padding='SAME'):
+    def define_network(self, block_layers=[], inception_layers=[], F=3, S_1=1, padding='SAME'):
 
         """
         Shortcut to creating a residual or residual-inception style network with just a few lines of code
@@ -2368,7 +2369,7 @@ class ResNet(SODMatrix):
         conv = [None] * (self.nb_blocks + 1)
 
         # Define the first layers before starting the Dense blocks
-        conv[0] = self.convolution('Conv1', input_images, F, self.filters, S_1, phase_train=self.phase_train)
+        conv[0] = self.convolution('Conv1', self.images, F, self.filters, S_1, phase_train=self.phase_train)
 
         # Loop through and make the downsample blocks
         for z in range (self.nb_blocks):
