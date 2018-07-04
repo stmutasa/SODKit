@@ -2350,7 +2350,7 @@ class ResNet(SODMatrix):
             return conv
 
 
-    def define_network(self, block_layers=[], inception_layers=[], F=3, S_1=1, padding='SAME'):
+    def define_network(self, block_layers=[], inception_layers=[], F=3, S_1=1, padding='SAME', downsample_last=True):
 
         """
         Shortcut to creating a residual or residual-inception style network with just a few lines of code
@@ -2383,12 +2383,12 @@ class ResNet(SODMatrix):
 
             # Generate the appropriate block, only downsample if not at the end
             if inception_layers[z]:
-                if x <= self.nb_blocks: conv[x] = self.inception_block(conv[z], block_layers[z], 'Res_'+str(x), filters, padding, True)
-                else: conv[x] = self.inception_block(conv[z], block_layers[z], 'Res_'+str(x), filters, padding, False)
+                if (not downsample_last) and x==self.nb_blocks: conv[x] = self.inception_block(conv[z], block_layers[z], 'Res_'+str(x), filters, padding, False)
+                else: conv[x] = self.inception_block(conv[z], block_layers[z], 'Res_'+str(x), filters, padding, True)
 
             else:
-                if x <= self.nb_blocks: conv[x] = self.residual_block(conv[z], block_layers[z], 'Res_'+str(x), filters, F, padding, True, False)
-                else: conv[x] = self.residual_block(conv[z], block_layers[z], 'Res_'+str(x), filters, F, padding, False, False)
+                if (not downsample_last) and x==self.nb_blocks: conv[x] = self.residual_block(conv[z], block_layers[z], 'Res_'+str(x), filters, F, padding, False, False)
+                else: conv[x] = self.residual_block(conv[z], block_layers[z], 'Res_'+str(x), filters, F, padding, True, False)
 
         # Return final layer and array of conv block outputs
         return conv[-1], conv
