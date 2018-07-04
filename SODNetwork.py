@@ -2350,18 +2350,18 @@ class ResNet(SODMatrix):
             return conv
 
 
-    def up_transition(self, scope, X, F, K, S, concat_var=None, padding='SAME'):
+    def up_transition(self, scope, X, F, K, S, concat_var=None, padding='SAME', res=True):
 
         """
-        Deconvolutions for the ResNet
+        Performs an upsampling procedure
         :param scope:
-        :param X:
-        :param F:
-        :param K:
-        :param S:
-        :param padding:
-        :param concat_var:
-        :param summary:
+        :param X: Inputs
+        :param F: Filter sizes
+        :param K: Kernel sizes
+        :param S: Stride size
+        :param concat_var: The skip connection
+        :param padding: SAME or VALID
+        :param res: Whether to concatenate or add the skip connection
         :return:
         """
 
@@ -2393,7 +2393,8 @@ class ResNet(SODMatrix):
             conv = tf.nn.bias_add(conv, bias)
 
             # Concatenate
-            conv = tf.concat([concat_var, conv], axis=-1)
+            if res: conv = tf.add(conv, concat_var)
+            else: conv = tf.concat([concat_var, conv], axis=-1)
 
             # Create a histogram summary and summary of sparsity
             if self.summary: self._activation_summary(conv)
@@ -2469,11 +2470,11 @@ class ResNet(SODMatrix):
                 filters = filter_size_buffer[-1]
 
                 # Perform upsample unless at the end
-                if x < self.nb_blocks: deconv[x] = self.up_transition('Upsample_' + str(x), deconv[z], 3, filters, 2, conv[-(x+1)])
+                if x < self.nb_blocks: deconv[x] = self.up_transition('Upsample_' + str(x), deconv[z], 3, filters, 2, conv[-(x+2)], res=True)
 
                 # Generate the appropriate block, no downsample obv
                 if inception_layers[-x]: deconv[x] = self.inception_block(deconv[x], block_layers[-(x+1)], 'UpInc_' + str(x), filters, padding, False)
-                else: deconv[x] = self.residual_block(conv[z], block_layers[-(x+1)], 'UpRes_' + str(x), filters, F, padding, False, False)
+                else: deconv[x] = self.residual_block(deconv[x], block_layers[-(x+1)], 'UpRes_' + str(x), filters, F, padding, False, False)
 
             # Return the feature pyramid outputs
             return deconv
