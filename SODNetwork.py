@@ -2350,7 +2350,58 @@ class ResNet(SODMatrix):
             return conv
 
 
-    def define_network(self, block_layers=[], inception_layers=[], F=3, S_1=1, padding='SAME', downsample_last=True):
+    def up_transition(self, scope, X, F, K, S, concat_var=None, padding='SAME'):
+
+        """
+        Deconvolutions for the ResNet
+        :param scope:
+        :param X:
+        :param F:
+        :param K:
+        :param S:
+        :param padding:
+        :param concat_var:
+        :param summary:
+        :return:
+        """
+
+        with tf.variable_scope(scope) as scope:
+
+            # Set channel size based on input depth
+            C = X.get_shape().as_list()[-1]
+
+            # He init
+            kernel = tf.get_variable('Weights', shape=[F, F, K, C], initializer=tf.contrib.layers.variance_scaling_initializer())
+
+            # Define the biases
+            bias = tf.get_variable('Bias', shape=[K], initializer=tf.constant_initializer(0.0))
+
+            # Add to the weights collection
+            tf.add_to_collection('weights', kernel)
+            tf.add_to_collection('biases', bias)
+
+            # Define the output shape
+            out_shape = X.get_shape().as_list()
+            out_shape[1] *= 2
+            out_shape[2] *= 2
+            out_shape[3] = K
+
+            # Perform the deconvolution. output_shape: A 1-D Tensor representing the output shape of the deconvolution op.
+            conv = tf.nn.conv2d_transpose(X, kernel, output_shape=out_shape, strides=[1, S, S, 1], padding=padding)
+
+            # Add in bias
+            conv = tf.nn.bias_add(conv, bias)
+
+            # Concatenate
+            conv = tf.concat([concat_var, conv], axis=-1)
+
+            # Create a histogram summary and summary of sparsity
+            if self.summary: self._activation_summary(conv)
+
+            return conv
+
+
+    def define_network(self, block_layers=[], inception_layers=[], F=3, S_1=1, padding='SAME', downsample_last=False, FPN=True):
 
         """
         Shortcut to creating a residual or residual-inception style network with just a few lines of code
@@ -2360,6 +2411,8 @@ class ResNet(SODMatrix):
         :param F: Filter sizes to use, default to 3
         :param S_1: Stride of the initial convolution: sometimes we don't want to downsample here
         :param padding: Padding to use, default ot 'SAME'
+        :param downsample_last: Whether to downsample the last block
+        :param: FPN = Whether to perform a FPN or UNet arm at the end and return the output activation maps
         :return:
                 conv[-1]: the final conv layer
                 conv: the array of outputs from each block
@@ -2371,6 +2424,9 @@ class ResNet(SODMatrix):
         # Define the first layers before starting the Dense blocks
         conv[0] = self.convolution('Conv1', self.images, F, self.filters, S_1, phase_train=self.phase_train)
 
+        # To save filters for later
+        filter_size_buffer = []
+
         # Loop through and make the downsample blocks
         for z in range (self.nb_blocks):
 
@@ -2380,18 +2436,49 @@ class ResNet(SODMatrix):
             # Set filter size for this block
             if S_1 == 1: filters = self.filters * (2**z)
             else: filters = self.filters * (2**x)
+            filter_size_buffer.append(filters)
 
             # Generate the appropriate block, only downsample if not at the end
             if inception_layers[z]:
-                if (not downsample_last) and x==self.nb_blocks: conv[x] = self.inception_block(conv[z], block_layers[z], 'Res_'+str(x), filters, padding, False)
-                else: conv[x] = self.inception_block(conv[z], block_layers[z], 'Res_'+str(x), filters, padding, True)
+                if (not downsample_last) and x==self.nb_blocks: conv[x] = self.inception_block(conv[z], block_layers[z], 'Inc_'+str(x), filters, padding, False)
+                else: conv[x] = self.inception_block(conv[z], block_layers[z], 'Inc_'+str(x), filters, padding, True)
 
             else:
                 if (not downsample_last) and x==self.nb_blocks: conv[x] = self.residual_block(conv[z], block_layers[z], 'Res_'+str(x), filters, F, padding, False, False)
                 else: conv[x] = self.residual_block(conv[z], block_layers[z], 'Res_'+str(x), filters, F, padding, True, False)
 
-        # Return final layer and array of conv block outputs
-        return conv[-1], conv
+        if FPN:
+            """
+            FPN has two main differences to a Unet decoder:
+            1. We don't decode all the way up to a feature map size equal to the original
+            2. We don't decrease kernel sizes as we upsample
+            """
+
+            # Set first dconv to output of final conv. Also save intermediate outputs
+            deconv = [None] * (self.nb_blocks + 1)
+            deconv[0] = conv[-1]
+
+            # Now loop through and perform the upsamples. Don't go all the way to initial size
+            for z in range(self.nb_blocks-1):
+
+                # Z holds the prior index, X holds the layer index
+                x = z + 1
+
+                # Set filter size for this block
+                filters = filter_size_buffer[-1]
+
+                # Perform upsample unless at the end
+                if x < self.nb_blocks: deconv[x] = self.up_transition('Upsample_' + str(x), deconv[z], 3, filters, 2, conv[-x])
+
+                # Generate the appropriate block, no downsample obv
+                if inception_layers[-x]: deconv[x] = self.inception_block(deconv[x], block_layers[-(x+1)], 'UpInc_' + str(x), filters, padding, False)
+                else: deconv[x] = self.residual_block(conv[z], block_layers[-(x+1)], 'UpRes_' + str(x), filters, F, padding, False, False)
+
+            # Return the feature pyramid outputs
+            return deconv
+
+        # Return final layer and array of conv block outputs if no FPN
+        else: return conv[-1], conv
 
 
 class ResUNet(ResNet):
