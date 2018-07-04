@@ -2469,12 +2469,16 @@ class ResNet(SODMatrix):
                 # Set filter size for this block
                 filters = filter_size_buffer[-1]
 
-                # Perform upsample unless at the end
-                if x < self.nb_blocks: deconv[x] = self.up_transition('Upsample_' + str(x), deconv[z], 3, filters, 2, conv[-(x+2)], res=True)
+                # Perform upsample unless at the end.
+                if x < self.nb_blocks: deconv[x] = self.up_transition('Upsample_' + str(x), deconv[z], 3, filters, 2, conv[-(x+2)], res=False)
+
 
                 # Generate the appropriate block, no downsample obv
                 if inception_layers[-x]: deconv[x] = self.inception_block(deconv[x], block_layers[-(x+1)], 'UpInc_' + str(x), filters, padding, False)
-                else: deconv[x] = self.residual_block(deconv[x], block_layers[-(x+1)], 'UpRes_' + str(x), filters, F, padding, False, False)
+                else:
+                    # 1x1 conv first to fix filter sizes for residual addition
+                    deconv[x] = self.convolution('1UpRes_' + str(x), deconv[x], 1, filters, 1, phase_train=self.phase_train)
+                    deconv[x] = self.residual_block(deconv[x], block_layers[-(x+1)], 'UpRes_' + str(x), filters, F, padding, False, False)
 
             # Return the feature pyramid outputs
             return deconv
