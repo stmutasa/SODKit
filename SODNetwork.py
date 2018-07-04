@@ -2383,11 +2383,11 @@ class ResNet(SODMatrix):
 
             # Generate the appropriate block, only downsample if not at the end
             if inception_layers[z]:
-                if x < self.nb_blocks: conv[x] = self.inception_block(conv[z], block_layers[z], 'Res_'+str(x), filters, padding, True)
+                if x <= self.nb_blocks: conv[x] = self.inception_block(conv[z], block_layers[z], 'Res_'+str(x), filters, padding, True)
                 else: conv[x] = self.inception_block(conv[z], block_layers[z], 'Res_'+str(x), filters, padding, False)
 
             else:
-                if x < self.nb_blocks: conv[x] = self.residual_block(conv[z], block_layers[z], 'Res_'+str(x), filters, F, padding, True, False)
+                if x <= self.nb_blocks: conv[x] = self.residual_block(conv[z], block_layers[z], 'Res_'+str(x), filters, F, padding, True, False)
                 else: conv[x] = self.residual_block(conv[z], block_layers[z], 'Res_'+str(x), filters, F, padding, False, False)
 
         # Return final layer and array of conv block outputs
