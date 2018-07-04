@@ -2415,7 +2415,8 @@ class ResNet(SODMatrix):
         :param: FPN = Whether to perform a FPN or UNet arm at the end and return the output activation maps
         :return:
                 conv[-1]: the final conv layer
-                conv: the array of outputs from each block
+                conv: the array of outputs from each block: If S1 is 1, keep in mind each index return the result of the block
+                    which is just the downsampled final layer. it RUNs at a higher feature map size
         """
 
         # conv holds output of bottleneck layers (no BN/ReLU). Concat holds running lists of skip connections
@@ -2468,7 +2469,7 @@ class ResNet(SODMatrix):
                 filters = filter_size_buffer[-1]
 
                 # Perform upsample unless at the end
-                if x < self.nb_blocks: deconv[x] = self.up_transition('Upsample_' + str(x), deconv[z], 3, filters, 2, conv[-x])
+                if x < self.nb_blocks: deconv[x] = self.up_transition('Upsample_' + str(x), deconv[z], 3, filters, 2, conv[-(x+1)])
 
                 # Generate the appropriate block, no downsample obv
                 if inception_layers[-x]: deconv[x] = self.inception_block(deconv[x], block_layers[-(x+1)], 'UpInc_' + str(x), filters, padding, False)
