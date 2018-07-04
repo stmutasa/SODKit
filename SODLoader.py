@@ -1285,6 +1285,31 @@ class SODLoader():
          Utility functions: Random tools for help
     """
 
+    def split_dict_equally(self, input_dict, chunks=2):
+
+        """
+        Function that splits a dictionary into equal chunks
+        :param input_dict: input dictionary
+        :param chunks: number of chunks
+        :return: A list of dictionaries
+        """
+
+        # Create empty dictionaries list first
+        return_list = [dict() for idx in range(chunks)]
+        idx = 0
+
+        # Save into each listed dictionary one at a time
+        for k, v in input_dict.items():
+            return_list[idx][k] = v
+
+            # Loop back to beginning
+            if idx < chunks - 1:
+                idx += 1
+            else:
+                idx = 0
+
+        return return_list
+
     def largest_blob(self, img):
         """
         This finds the biggest blob in a 2D or 3D volume and returns the center of the blob
