@@ -2481,7 +2481,7 @@ class ResNet(SODMatrix):
                     deconv[x] = self.residual_block(deconv[x], block_layers[-(x+1)], 'UpRes_' + str(x), filters, F, padding, False, False)
 
             # Return the feature pyramid outputs
-            return deconv
+            return conv[-1], deconv
 
         # Return final layer and array of conv block outputs if no FPN
         else: return conv[-1], conv
