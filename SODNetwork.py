@@ -2389,12 +2389,18 @@ class ResNet(SODMatrix):
             # Perform the deconvolution. output_shape: A 1-D Tensor representing the output shape of the deconvolution op.
             conv = tf.nn.conv2d_transpose(X, kernel, output_shape=out_shape, strides=[1, S, S, 1], padding=padding)
 
-            # Add in bias
-            conv = tf.nn.bias_add(conv, bias)
-
             # Concatenate
             if res: conv = tf.add(conv, concat_var)
             else: conv = tf.concat([concat_var, conv], axis=-1)
+
+            # Apply the batch normalization. Updates weights during training phase only
+            conv = self.batch_normalization(conv, self.phase_train, scope)
+
+            # Add in bias
+            conv = tf.nn.bias_add(conv, bias)
+
+            # Relu
+            conv = tf.nn.relu(conv, name=scope.name)
 
             # Create a histogram summary and summary of sparsity
             if self.summary: self._activation_summary(conv)
@@ -2402,7 +2408,7 @@ class ResNet(SODMatrix):
             return conv
 
 
-    def define_network(self, block_layers=[], inception_layers=[], F=3, S_1=1, padding='SAME', downsample_last=False, FPN=True):
+    def define_network(self, block_layers=[], inception_layers=[], F=3, S_1=1, padding='SAME', downsample_last=False, FPN=True, FPN_layers=64):
 
         """
         Shortcut to creating a residual or residual-inception style network with just a few lines of code
@@ -2414,6 +2420,7 @@ class ResNet(SODMatrix):
         :param padding: Padding to use, default ot 'SAME'
         :param downsample_last: Whether to downsample the last block
         :param: FPN = Whether to perform a FPN or UNet arm at the end and return the output activation maps
+        :param FPN_layers: How many layers to output in the FPN
         :return:
                 conv[-1]: the final conv layer
                 conv: the array of outputs from each block: If S1 is 1, keep in mind each index return the result of the block
@@ -2456,29 +2463,24 @@ class ResNet(SODMatrix):
             2. We don't decrease kernel sizes as we upsample
             """
 
-            # Set first dconv to output of final conv. Also save intermediate outputs
-            deconv = [None] * (self.nb_blocks + 1)
-            deconv[0] = conv[-1]
+            # Set first dconv to output of final conv after 1x1 conv. Also save intermediate outputs
+            deconv = [None] * (self.nb_blocks-1)
+            deconv[0] = self.convolution('FPNUp1', conv[-1], 1, FPN_layers, 1, phase_train=self.phase_train)
 
             # Now loop through and perform the upsamples. Don't go all the way to initial size
-            for z in range(self.nb_blocks-1):
+            for z in range(self.nb_blocks-2):
 
                 # Z holds the prior index, X holds the layer index
                 x = z + 1
 
-                # Set filter size for this block
-                filters = filter_size_buffer[-1]
+                # First 1x1 conv the skip connection
+                skip = self.convolution('FPNUp_'+str(x), conv[-(x+2)], 1, FPN_layers, 1, phase_train=self.phase_train)
 
                 # Perform upsample unless at the end.
-                if x < self.nb_blocks: deconv[x] = self.up_transition('Upsample_' + str(x), deconv[z], 3, filters, 2, conv[-(x+2)], res=False)
+                if x < self.nb_blocks: deconv[x] = self.up_transition('Upsample_' + str(x), deconv[z], 3, FPN_layers, 2, skip, res=True)
 
-
-                # Generate the appropriate block, no downsample obv
-                if inception_layers[-x]: deconv[x] = self.inception_block(deconv[x], block_layers[-(x+1)], 'UpInc_' + str(x), filters, padding, False)
-                else:
-                    # 1x1 conv first to fix filter sizes for residual addition
-                    deconv[x] = self.convolution('1UpRes_' + str(x), deconv[x], 1, filters, 1, phase_train=self.phase_train)
-                    deconv[x] = self.residual_block(deconv[x], block_layers[-(x+1)], 'UpRes_' + str(x), filters, F, padding, False, False)
+                # Finally, perform the 3x3 conv without Relu
+                deconv[x] = self.convolution('FPNOut_' + str(x), deconv[x], 3, FPN_layers, 1, phase_train=self.phase_train, BN=False, relu=False, bias=False)
 
             # Return the feature pyramid outputs
             return conv[-1], deconv
