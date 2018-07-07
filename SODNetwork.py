@@ -57,8 +57,7 @@ class SODMatrix(object):
             self.training_phase = phase_train
 
             # Define the Kernel. Can use Xavier init: contrib.layers.xavier_initializer())
-            kernel = tf.get_variable('Weights', shape=[F, F, C, K],
-                                     initializer=tf.contrib.layers.variance_scaling_initializer())
+            kernel = tf.get_variable('Weights', shape=[F, F, C, K], initializer=tf.contrib.layers.variance_scaling_initializer())
 
             # Add to the weights collection
             tf.add_to_collection('weights', kernel)
@@ -2785,3 +2784,807 @@ class ResUNet(ResNet):
 
         # Return final layer after batch norm and relu
         return tf.nn.relu(self.batch_normalization(deconv, self.phase_train, None))
+
+
+class MRCNN(SODMatrix):
+
+    """
+    The multiple inheritence class to perform all functions of making mask RCNNs!
+    """
+
+    # Shared class variables here
+
+    def __init__(self, phase_train, GPU_count=1, Images_per_gpu=2, FCN=256, K1=32, Num_classes=1, FPN_layers=64,
+                 RPN_anchor_scales= (32), RPN_anchor_ratios = [0.5, 1, 2], RPN_anchor_stride=1,
+                 RPN_nms_upper_threshold = 0.7, RPN_nms_lower_threshold=0.3, RPN_anchors_per_image=256,
+                 POST_NMS_ROIS_training=2000, POST_NMS_ROIS_testing=1000, Use_mini_mask=False, Mini_mask_shape = [56, 56]):
+
+        """
+        Instance specific variables
+        :param phase_train: Training or testing mode
+        :param GPU_count: Numbger of GPUs to use
+        :param Images_per_gpu: Number of images to train with on each GPU. Use highest number gpu can handle
+        :param FCN: Number of neurons in the first fully connected layer
+        :param K1: Number of filters in the first layer
+        :param Num_classes: Number of classification classes
+        :param RPN_anchor_scales: Length of square anchor side in pixels
+        :param RPN_anchor_ratios: Ratios of anchors at each cell (width/height) 1 represents a square anchor, and 0.5 is a wide anchor
+        :param RPN_anchor_stride: Anchor stride. 1 = anchors are created for each cell in the backbone feature map. 2 = anchors are created for every other cell
+        :param RPN_nms_upper_threshold: Non-max suppression threshold to filter RPN proposals. Increase for more proposals
+        :param RPN_nms_lower_threshold: Non-min suppression threshold to filter RPN proposals. Decrease for more proposals
+        :param RPN_anchors_per_image: ow many anchors per image to use for RPN training
+        :param POST_NMS_ROIS_training: ROIs kept after non-maximum supression (training)
+        :param POST_NMS_ROIS_testing: ROIs kept after non-maximum supression (inference)
+        :param Use_mini_mask: If enabled, resizes instance masks to a smaller size to reduce memory usage
+        :param Mini_mask_shape: (height, width) of the mini-mask
+        """
+
+        self.phase_train = phase_train
+        self.GPU_count = GPU_count
+        self.Images_per_gpu = Images_per_gpu
+        self.FCN = FCN
+        self.K1 = K1
+        self.Num_classes = Num_classes
+        self.FPN_layers = FPN_layers
+        self.RPN_anchor_scales = RPN_anchor_scales
+        self.RPN_anchor_ratios = RPN_anchor_ratios
+        self.RPN_anchor_stride = RPN_anchor_stride
+        self.RPN_nms_upper_threshold = RPN_nms_upper_threshold
+        self.RPN_nms_lower_threshold = RPN_nms_lower_threshold
+        self.RPN_anchors_per_image = RPN_anchors_per_image
+        self.POST_NMS_ROIS_training = POST_NMS_ROIS_training
+        self.POST_NMS_ROIS_testing = POST_NMS_ROIS_testing
+        self.Use_mini_mask = Use_mini_mask
+        self.Mini_mask_shape = Mini_mask_shape
+
+        # Keeping track of the layers and losses
+        self.RPN_conv = None
+        self.RPN_ROI = None
+        self.RPN_Loss_Object = None
+        self.RPN_Loss_Box = None
+        self.RPN_class_logits = None
+        self.RPN_bbox_score = None
+
+
+    """
+    Baseline Networks
+    """
+
+    # Overwrite the convolution function wrapper to include the reuse flag for our RPN to work on a FPN output. Remove downsample and dropout
+    def convolution_RPN(self, scope, X, F, K, S=1, padding='SAME', phase_train=None, BN=True, relu=True, bias=True, reuse=None, summary=True):
+        """
+        This is a wrapper for convolutions
+        :param scope:
+        :param X: Output of the prior layer
+        :param F: Convolutional filter size
+        :param K: Number of feature maps
+        :param S: Stride
+        :param padding: 'SAME' or 'VALID'
+        :param phase_train: For batch norm implementation
+        :param BN: whether to perform batch normalization
+        :param relu: bool, whether to do the activation function at the end
+        :param bias: whether to include a bias term
+        :param reuse: wehther we will be reusing this layer
+        :param summary: whether to output a summary
+        :return:
+        """
+
+        # Set channel size based on input depth
+        C = X.get_shape().as_list()[-1]
+        B = X.get_shape().as_list()[0]
+
+        # Set the scope
+        with tf.variable_scope(scope, reuse=reuse) as scope:
+
+            # Set training phase variable
+            self.training_phase = phase_train
+
+            # Define the Kernel. Can use Xavier init: contrib.layers.xavier_initializer())
+            kernel = tf.get_variable('Weights', shape=[F, F, C, K], initializer=tf.contrib.layers.variance_scaling_initializer())
+
+            # Add to the weights collection
+            tf.add_to_collection('weights', kernel)
+
+            # Perform the actual convolution
+            conv = tf.nn.conv2d(X, kernel, [1, S, S, 1], padding=padding)
+
+            # Add in the bias
+            if bias:
+                bias = tf.get_variable('Bias', shape=[K], initializer=tf.constant_initializer(0.0))
+                tf.add_to_collection('biases', bias)
+                conv = tf.nn.bias_add(conv, bias)
+
+            # Relu activation
+            if relu: conv = tf.nn.relu(conv, name=scope.name)
+
+            # Apply the batch normalization. Updates weights during training phase only
+            if BN: conv = self.batch_normalization(conv, phase_train, scope)
+
+            # Create a histogram/scalar summary of the conv1 layer
+            if summary: self._activation_summary(conv)
+
+            return conv
+
+
+    def RCNN_base(self, input_images, net_type, input_dims, FPN=True):
+
+        """
+        Builds the base feature pyramid network
+        :param input_images: the input images
+        :param net_type: can be a ResNet, DenseNet or Inception net
+        :param input_dims: dimensions of the input images
+        :param FPN: Whether to use a feature pyramid network (you should)
+        :return:
+                The final feature map outputs from the feature pyramid network
+        """
+
+        # Calculate how many blocks are needed to get to a final dimension of 32x32
+        nb_blocks = int((input_dims/32) ** (0.5)) + 1
+
+        # Calculate block layers downsampling scheme
+        block_sizes = [None] * nb_blocks
+        for z in range(nb_blocks): block_sizes[z] = 2 + 2*z
+
+        if net_type == 'RESIDUAL':
+
+            # Define a ResNet
+            self.resnet = ResNet(nb_blocks=nb_blocks, filters=16, images=input_images, sess=None, phase_train=self.phase_train, summary=True)
+
+            # Make sure all the 64x64 and below feature maps are inception style
+            inception_layers = [None] * nb_blocks
+            inception_layers[-1], inception_layers[-2] = 1, 1
+
+            # Define the downsample network and retreive the output of each block #TODO: Fix class inheritence and FPN layers
+            if FPN: final_conv, self.conv = self.resnet.define_network(block_sizes, inception_layers, FPN=True, FPN_layers=self.FPN_layers)
+            else: final_conv, self.conv = self.resnet.define_network(block_sizes, inception_layers, FPN=False)
+
+            return final_conv, self.conv
+
+        if net_type == 'DENSE':
+            pass
+
+
+    def RCNN_RPN(self, FPN_features):
+
+        """
+        TODO: Defines the region proposal network
+        :param FPN_features: [] Output for the basenetwork. A collection of feature maps from the FPN
+        :return:
+                ROI: Regions of interest
+                RPN_Loss_Object: The loss regaarding whether an object was found
+                RPN_Loss_Box: The loss regarding the bounding box
+        """
+
+        # Create arrays to hold the output logits for each level
+        class_logits, box_logits = [], []
+
+        # Calculate number of outputs for each head
+        try: num_class_scores = 2 * len(self.RPN_anchor_scales) * len(self.RPN_anchor_ratios)
+        except: num_class_scores = 2 * len(self.RPN_anchor_ratios)
+        num_bbox_scores = 2 * num_class_scores
+
+        # Loop through the FPN levels
+        for lvl in range(len(FPN_features)):
+
+            # To share the head, we need reuse flag and a scope list
+            reuse_flag = None if lvl==0 else True
+            scope_list = ['RPN_3x3', 'RPN_Classifier', 'RPN_Regressor']
+
+            # Now run a 3x3 conv, then separate 1x1 convs for each feature map #TODO: Check if VALID, check BN/Relu
+            rpn_3x3 = self.convolution_RPN(scope_list[0], FPN_features[lvl], 3, self.FPN_layers, phase_train=self.phase_train, reuse=reuse_flag)
+            rpn_class = self.convolution_RPN(scope_list[1], rpn_3x3, 1, num_class_scores, BN=False, relu=False, bias=False, phase_train=self.phase_train, reuse=reuse_flag)
+            rpn_box = self.convolution_RPN(scope_list[2], rpn_3x3, 1, num_bbox_scores, BN=False, relu=False, bias=False, phase_train=self.phase_train, reuse=reuse_flag)
+
+            # Reshape the scores and append to the list
+            rpn_class, rpn_box = tf.reshape(rpn_class, [-1, 2]), tf.reshape(rpn_box, [-1, 4])
+            class_logits.append(rpn_class)
+            box_logits.append(rpn_box)
+
+        # Return the concatenated list
+        return tf.concat(class_logits, axis=0), tf.concat(box_logits, axis=0)
+
+
+
+    """
+    Region proposal box generating functions, aka "anchor" functions
+    """
+
+    def generate_anchors(self, shape, feature_stride, ratios, scales, anchor_stride):
+
+        """
+        For generating anchors
+        :param shape: [height, width] spatial shape of the feature map over which to generate anchors
+        :param ratios: [1D array] of anchor ratios of width/height. i.e [0.5, 1, 2]
+        :param scales: [1D array] of anchor scales in original space
+        :param feature_stride: int, stride of feature map relative to the image in pixels
+        :param anchor_stride: int, stride of anchors on the feature map
+        :return:
+        """
+
+        # Get all combinations of scales and ratios
+        scales, ratios = np.meshgrid(np.array(scales), np.array(ratios))
+        scales = scales.flatten()
+        ratios = ratios.flatten()
+
+        # Enumerate heights and widths from scales and ratios
+        heights = scales / np.sqrt(ratios)
+        widths = scales * np.sqrt(ratios)
+
+        # Enumerate shifts in feature space
+        shifts_y = np.arange(0, shape[0], anchor_stride) * feature_stride
+        shifts_x = np.arange(0, shape[1], anchor_stride) * feature_stride
+        shifts_x, shifts_y = np.meshgrid(shifts_x, shifts_y)
+
+        # Enumerate combinations of shifts, widths, and heights
+        box_widths, box_centers_x = np.meshgrid(widths, shifts_x)
+        box_heights, box_centers_y = np.meshgrid(heights, shifts_y)
+
+        # Reshape to get a list of (y, x) and a list of (h, w)
+        box_centers = np.stack([box_centers_y, box_centers_x], axis=2).reshape([-1, 2])
+        box_sizes = np.stack([box_heights, box_widths], axis=2).reshape([-1, 2])
+
+        # Convert to corner coordinates (y1, x1, y2, x2)
+        boxes = np.concatenate([box_centers - 0.5 * box_sizes, box_centers + 0.5 * box_sizes], axis=1)
+
+        return boxes
+
+
+    def generate_anchor_pyramid(self, scales, ratios, feature_shapes, feature_strides, anchor_strides):
+
+        """
+        Generate anchors at different feature pyramid levels. Each scale is for 1 level. Each ratio is for all levels.
+        :param scales:
+        :param ratios:
+        :param feature_shapes:
+        :param feature_strides:
+        :param anchor_strides:
+        :return: [N, (y1, x1, y2, x2)] All generated anchors in one aray sorted in order of given scales
+        """
+
+        # Empty array to hold return values
+        anchors = []
+        for z in range (len(scales)): anchors.append(self.generate_anchors(feature_shapes[z], feature_strides[z], ratios, scales[z], anchor_strides))
+
+        # Return the generated anchors for this feature map
+        return np.concatenate(anchors, axis=0)
+
+
+    """
+    Bounding box functions
+    """
+
+    def extract_box_labels(self, mask, dim_3d=False):
+
+        """
+        Returns the bounding box labels from each 2D segmentation mask. Can work with multiple label groupings (classes)
+        :param mask: Input mask in 2D [height, weight, channels] or 3D [slice, height, weight, channels]
+        :param dim_3d: bool, whether input is 3D or 2D
+        :return: np list of arrays of bounding box coordinates of the corners [N, (y1, x1, y2, x2)]
+        """
+
+        if dim_3d:
+
+            # Expand dims
+            if mask.ndim < 4: mask = np.expand_dims(mask, axis=-1)
+
+            # Make dummy array with diff boxes for each channel
+            boxes = np.zeros([mask.shape[0], mask.shape[-1], 4], dtype=np.int32)
+
+            for a in range (mask.shape[0]):
+
+                # Loop through all the classes (channels)
+                for z in range(mask[a].shape[-1]):
+
+                    # Work on just this class of pixel
+                    m = mask[a, :, :, z]
+
+                    # Bounding boxes generated by finding indices with true values
+                    x_indices = np.where(np.any(m, axis=0))[0]
+                    y_indices = np.where(np.any(m, axis=1))[0]
+
+                    if x_indices.shape[0]:
+
+                        x1, x2 = x_indices[[0, -1]]
+                        y1, y2 = y_indices[[0, -1]]
+
+                        # Increment x2 and y2 by 1 since theyre not part of the initial box
+                        x2 += 1
+                        y2 += 1
+
+                    else:
+
+                        # No mask for this instance, happens a lot. Sets boxes to zero
+                        x1, x2, y1, y2 = 0, 0, 0, 0
+
+                    # Append coordinates to boxes
+                    boxes[a, z] = np.array([y1, x1, y2, x2])
+
+            return boxes.astype(np.int32)
+
+        else:
+
+            # Expand dims
+            if mask.ndim < 3: mask = np.expand_dims(mask, axis=-1)
+
+            # Make dummy array with diff boxes for each channel
+            boxes = np.zeros([mask.shape[-1], 4], dtype=np.int32)
+
+            # Loop through all the classes (channels)
+            for z in range (mask.shape[-1]):
+
+                # Work on just this class of pixel
+                m = mask[:, :, z]
+
+                # Bounding boxes generated by finding indices with true values
+                x_indices = np.where(np.any(m, axis=0))[0]
+                y_indices = np.where(np.any(m, axis=1))[0]
+
+                if x_indices.shape[0]:
+
+                    x1, x2 = x_indices[[0, -1]]
+                    y1, y2 = y_indices[[0, -1]]
+
+                    # Increment x2 and y2 by 1 since theyre not part of the initial box
+                    x2 += 1
+                    y2 += 1
+
+                else:
+
+                    # No mask for this instance, happens a lot. Sets boxes to zero
+                    x1, x2, y1, y2 = 0, 0, 0, 0
+
+                # Append coordinates to boxes
+                boxes[z] = np.array([y1, x1, y2, x2])
+
+            return boxes.astype(np.int32)
+
+
+    def calculate_iou(self, box, boxes, box_area, boxes_area):
+
+        """
+        Function that calculates intersection over union of the given box with the given array of boxes
+        :param box: The given box corner coordinates [y1, x1, y2, x2]
+        :param boxes: Boxes to check [N, (y1, x1, y2, x2)]
+        :param box_area: float, the area of 'box'
+        :param boxes_area: array of length boxes_count
+        :return: intersection over union
+        """
+
+        # retreive box coordinates
+        y1, y2 = np.maximum(box[0], boxes[:, 0]), np.minimum(box[2], boxes[:, 2])
+        x1, x2 = np.maximum(box[1], boxes[:, 1]), np.minimum(box[3], boxes[:, 3])
+
+        # Calculate the intersection over union
+        intersection = np.maximum(x2 - x1, 0) * np.maximum(y2 - y1, 0)
+        union = box_area + boxes_area[:] - intersection[:]
+
+        return intersection / union
+
+
+    def calculate_overlaps_IoU_boxes(self, boxes1, boxes2):
+
+        """
+        Calculates the IoU overlaps between two sets of boxes. Pass smaller set second for best performance
+        :param boxes1: [N, (y1, x1, y2, x2)].
+        :param boxes2: [N, (y1, x1, y2, x2)].
+        :return: overlaps
+        """
+
+        # Area of anchors and ground truth boxes
+        area1 = (boxes1[:, 2] - boxes1[:, 0]) * (boxes1[:, 3] - boxes1[:, 1])
+        area2 = (boxes2[:, 2] - boxes2[:, 0]) * (boxes2[:, 3] - boxes2[:, 1])
+
+        # Compute overlaps to generate matrix [boxes1 count, boxes2 count] where each cell contains the IoU value.
+        overlaps = np.zeros((boxes1.shape[0], boxes2.shape[0]))
+        for i in range(overlaps.shape[1]):
+            box2 = boxes2[i]
+            overlaps[:, i] = self.calculate_iou(box2, boxes1, area2[i], area1)
+
+        return overlaps
+
+
+    def calculate_overlaps_mask_box(self, mask, box):
+
+        """
+        Calculates the overlap between a mask and a box:
+        :param mask: 2D mask
+        :param box: [y1, x1, y2, x2]
+        :return: Number of nonzero mask pixels / box area
+        """
+
+        # Calculate the nonzero pixels of the mask in the range of the box
+        nonzero = np.count_nonzero(mask[box[0]:box[2], box[1]:box[3]])
+
+        # Calculate the area of the box
+        area = (box[2], - box[0]) * (box[3] - box[1])
+
+        return nonzero / area
+
+
+    def calculate_overlaps_masks(self, masks1, masks2):
+
+        """
+        Calculates the IoU overlaps between two sets of masks
+        :param masks1: [height, width, instances]
+        :param masks2: [height, width, instances]
+        :return:
+        """
+
+        # If either set of masks is empty return empty result
+        if masks1.shape[0] == 0 or masks2.shape[0] == 0: return np.zeros((masks1.shape[0], masks2.shape[-1]))
+
+        # flatten masks and compute their areas
+        masks1 = np.reshape(masks1 > .5, (-1, masks1.shape[-1])).astype(np.float32)
+        masks2 = np.reshape(masks2 > .5, (-1, masks2.shape[-1])).astype(np.float32)
+        area1, area2 = np.sum(masks1, axis=0), np.sum(masks2, axis=0)
+
+        # intersections and union
+        intersections = np.dot(masks1.T, masks2)
+        union = area1[:, None] + area2[None, :] - intersections
+
+        return intersections / union
+
+
+    def calculate_non_max_suppression(self, boxes, scores, IoU_threshold):
+
+        """
+        Groups highly overlapped boxes for the same class and selects the most confident predictions only.
+        This avoids duplicates for the same object
+        :param boxes: [N, (y1, x1, y2, x2)]
+        :param scores: 1-D array of the box scores
+        :param IoU_threshold: float, IoU threshold to use for filtering
+        :return: List of the final boxes
+        """
+
+        # Debug code first for box shape then making sure boxes are floats
+        assert boxes.shape[0] > 0, "No boxes passed to non max suppression"
+        if boxes.dtype.kind != 'f': boxes = boxes.astype(np.float32)
+
+        # Calculate box areas
+        y1, x1, y2, x2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+        area = (y2 - y1) * (x2 - x1)
+
+        # Retreive box indices sorted by higest scores first
+        indices = scores.argsort()[:, :, -1]
+        picks = []
+
+        while len(indices) > 0:
+
+            # Select the top box and add it's index to the list
+            i = indices[0]
+            picks.append(i)
+
+            # Compute IoU of the picked box with the rest of the boxes
+            iou = self.calculate_iou(boxes[i], boxes[indices[1:]], area[i], area[indices[1:]])
+
+            # Find boxes with IoU over threshold and return indices. Add 1 to get indices into [indices]
+            remove_indices = np.where(iou > IoU_threshold)[0] + 1
+
+            # Remove the indices of the overlapped boxes and the picked box
+            indices = np.delete(indices, remove_indices)
+            indices = np.delete(indices, 0)
+
+        return np.array(picks, dtype=np.int32)
+
+
+    def generate_deltas(self, anchors, offsets):
+
+        """
+        Function that generates the deltas from the RPN
+        :param anchors:
+        :param offsets:
+        :return:
+        """
+
+        deltas = np.zeros(offsets.shape)
+        idx = np.sum(np.abs(anchors), axis=1) > 0
+        idx = np.nonzero(idx)[0]
+
+        for z in idx:
+
+            # Retreive the source and target coordinates
+            y, x, h, w = offsets[z]
+            y1, x1, y2, x2 = anchors[z]
+
+            # Retreive center point and mean transform
+            ya, xa = np.mean((y1, y2)), np.mean((x1, x2))
+            h2, w2 = (y2 - y1), (x2 - x1)
+
+            # Generate the delta array. Avoid numerical errors
+            deltas[z] = [(ya - y) / h, (xa - x) / w, np.log(h2 / (h+1e-6)), np.log(w2 / (w + 1e-6))]
+
+            return deltas.astype('float32')
+
+
+    def calculate_box_deltas(self, box, label_box):
+
+        """
+        Calculates the refinement needed to transform predicted box to the label (ground truth) box
+        :param box: [N, (y1, x1, y2, x2)]
+        :param label_box: [N, (y1, x1, y2, x2)]
+        :return:
+        """
+
+        # Convert to float32
+        box, label_box = tf.cast(box, tf.float32), tf.cast(label_box, tf.float32)
+
+        # Convert to y, x, h, w
+        h, w = (box[:, 2] - box[:, 0]), (box[:, 3] - box[:, 1])
+        center_y, center_x = (h * 0.5 + box[:, 0]), (w * 0.5 + box[:, 1])
+        lbl_h, lbl_w = (label_box[:, 2] - label_box[:, 0]), (label_box[:, 3] - label_box[:, 1])
+        lbl_center_y, lbl_center_x = (lbl_h * 0.5 + label_box[:, 0]), (lbl_w * 0.5 + label_box[:, 1])
+
+        # Now calculate the normalized shifts
+        dy = (lbl_center_y - center_y) / h
+        dx = (lbl_center_x - center_x) / w
+        dh, dw = tf.log(lbl_h / h), tf.log(lbl_w / w)
+
+        return tf.stack([dy, dx, dh, dw], axis=1)
+
+
+    def apply_deltas(self, boxes, deltas):
+
+        """
+        Applies the deltas given to the boxes given
+        :param boxes: [N, (y1, x1, y2, x2)]
+        :param deltas: [N, (dy, dx, log(dh), log(dw)]
+        :return:
+        """
+
+        # Fix data type
+        boxes = boxes.astype(np.float32)
+
+        # Convert to y, x, h, w
+        h, w = (boxes[:, 2] - boxes[:, 0]), (boxes[:, 3] - boxes[:, 1])
+        center_y, center_x = (h * 0.5 + boxes[:, 0]), (w * 0.5 + boxes[:, 1])
+
+        # Apply deltas
+        center_y += deltas[:, 0] * h
+        center_x += deltas[:, 1] * w
+
+        # Convert back to y1, x1, y2, x2
+        y1, x1 = (center_y - 0.5*h), (center_x - 0.5*w)
+        y2, x2 = (y1 + h), (x1 + w)
+
+        return np.stack([y1, x1, y2, x2], axis=1)
+
+
+    """
+    Testing functions
+    """
+
+    def trim_zeros(self, x):
+
+        """
+        Remove all rows of a tensor that are all zeros
+        :param x: [rows, columns]
+        :return:
+        """
+
+        assert len(x.shape == 2)
+        return x[~np.all(x==0, axis=1)]
+
+
+    def test_calculate_matches(self, gt_boxes, gt_class_ids, gt_masks, pred_boxes, pred_class_ids, pred_scores, pred_masks, iou_threshold=0.5, score_threshold=0.0):
+
+        """
+        Finds matches between the predictions and ground truth
+        :param gt_boxes:
+        :param gt_class_ids:
+        :param gt_masks:
+        :param pred_boxes:
+        :param pred_class_ids:
+        :param pred_scores
+        :param pred_masks:
+        :param iou_threshold:
+        :param score_threshold:
+        :return:
+                gt_match: 1-D array. For each GT box it has the index of the matched predicted box.
+                pred_match: 1-D array. For each predicted box, it has the index of the matched ground truth box.
+                overlaps: [pred_boxes, gt_boxes] IoU overlaps.
+        """
+
+        # Trim zero padding of the masks
+        gt_boxes, pred_boxes = self.trim_zeros(gt_boxes), self.trim_zeros(pred_boxes)
+        gt_masks, pred_scores = gt_masks[..., :gt_boxes.shape[0]], pred_scores[:pred_boxes.shape[0]]
+
+        # Sort predictions by scores from high to low
+        indices = np.argsort(pred_scores)[::-1]
+        pred_boxes, pred_class_ids = pred_boxes[indices], pred_class_ids[indices]
+        pred_scores, pred_masks = pred_scores[indices], pred_masks[..., indices]
+
+        # Compute iou overlaps
+        overlaps = self.calculate_overlaps_masks(pred_masks, gt_masks)
+
+        # Loop through predictions and find the matching ground truth boxes
+        match_count = 0
+        pred_match = -1 * np.ones([pred_boxes.shape[0]])
+        gt_match = -1 * np.ones([gt_boxes.shape[0]])
+        for i in range(len(pred_boxes)):
+
+            # Find the best best matching ground truth box: 1. sort matches by overlap score
+            sorted_index = np.argsort(overlaps[i])[::-1]
+
+            # Remove low scores
+            low_score_index = np.where(overlaps[i, sorted_index] < score_threshold)[0]
+            if low_score_index.size > 0: sorted_index = sorted_index[:low_score_index[0]]
+
+            # Find the match
+            for j in sorted_index:
+
+                # if ground truth box is already matched, move on
+                if gt_match[j] > 0: continue
+
+                # If IoU is smaller than the threshold, end the loop
+                iou = overlaps[i, j]
+                if iou < iou_threshold: break
+
+                # Check for a match
+                if pred_class_ids[i] == gt_class_ids[j]:
+                    match_count +=1
+                    gt_match[j], pred_match[i] = i, j
+                    break
+
+        return gt_match, pred_match, overlaps
+
+
+    def test_calculate_PPV(self, gt_boxes, gt_class_ids, gt_masks, pred_boxes, pred_class_ids, pred_scores, pred_masks, iou_threshold=0.5):
+
+        """
+        Calculates the average precision (AKA PPV) at a set IoU threshold and Sensitivity (AKA Recall)
+        :param gt_boxes:
+        :param gt_class_ids:
+        :param gt_masks:
+        :param pred_boxes:
+        :param pred_class_ids:
+        :param pred_scores:
+        :param pred_masks:
+        :param iou_threshold:
+        :return:
+                mAP: Mean Average Precision
+                precisions: List of precisions at different class score thresholds.
+                recalls: List of recall values at different class score thresholds.
+                overlaps: [pred_boxes, gt_boxes] IoU overlaps.
+        """
+
+        # Get matches and overlaps
+        gt_match, pred_match, overlaps = self.test_calculate_matches(gt_boxes, gt_class_ids, gt_masks, pred_boxes, pred_class_ids, pred_scores, pred_masks, iou_threshold)
+
+        # Compute precision and recall at each prediction box step
+        precisions = np.cumsum(pred_match > -1) / (np.arange(len(pred_match)) + 1)
+        recalls = np.cumsum(pred_match > -1).astype(np.float32) / len(gt_match)
+
+        # Ensure precision values increase but don't decrease. To ensure the PPV at each sensitivity threshold is the max for all following thresholds
+        for i in range(len(precisions) - 2, -1, -1): precisions[i] = np.maximum(precisions[i], precisions[i + 1])
+
+        # Compute mean average precision over the sensitivity range
+        idx = np.where(recalls[:-1] != recalls[1:])[0] + 1
+        mAP = np.sum((recalls[idx] - recalls[idx - 1]) * precisions[idx])
+
+        return mAP, precisions, recalls, overlaps
+
+
+    def test_calculate_PPV_range(self, gt_box, gt_class_id, gt_mask, pred_box, pred_class_id, pred_score, pred_mask, iou_thresholds=0.5, verbose=1):
+
+        """
+        Calculates the average precision (PPV) over a range or IoU thresholds.
+        :param gt_box:
+        :param gt_class_id:
+        :param gt_mask:
+        :param pred_boxe:
+        :param pred_class_id:
+        :param pred_score:
+        :param pred_mask:
+        :param iou_threshold:
+        :param verbose:
+        :return:
+        """
+
+        # Default is 0.5 to 0.95 with increments of 0.05
+        iou_thresholds = iou_thresholds or np.arange(0.5, 0.95, 0.05)
+
+        # compute PPV over the thresholds
+        PPV = []
+        for iou_threshold in iou_thresholds:
+
+            ppv, precisions, recals, overlaps = self.test_calculate_PPV(gt_box, gt_class_id, gt_mask, pred_box, pred_class_id, pred_score, pred_mask, iou_threshold=iou_threshold)
+            PPV.append(ppv)
+
+            # Display information if desired
+            if verbose: print ('PPV: %.2f: \t %.3f' %(iou_threshold, ppv))
+
+        PPV = np.array(PPV).mean()
+        if verbose: print ('PPV: %.2f: \t %.3f: \t %.3f' %(iou_thresholds[0], iou_thresholds[-1], PPV))
+
+        return PPV
+
+
+    def test_calculate_SN(self, pred_boxes, gt_boxes, iou):
+
+        """
+        Calculates the recall (AKA Sensitivity) at the given IoU threshold
+        :param pred_boxes: [N, (y1, x1, y2, x2)] in image coordinates
+        :param gt_boxes: [N, (y1, x1, y2, x2)]
+        :param iou: threshold iou
+        :return:
+        """
+
+        # Measure overlaps
+        overlaps = self.calculate_overlaps_IoU_boxes(pred_boxes, gt_boxes)
+        iou_max, iou_argmax = np.max(overlaps, axis=1), np.argmax(overlaps, axis=1)
+        positive_ids = np.where(iou_max >= iou)[0]
+        matched_gt_boxes = iou_argmax[positive_ids]
+
+        # Calculate sensitivity
+        recall = len(set(matched_gt_boxes)) / gt_boxes.shape[0]
+
+        return recall, positive_ids
+
+
+    """
+    Utility Functions
+    """
+
+    def batch_slice(self, inputs, graph_fn, batch_size, names=None):
+
+        """
+        Splits inputs into slices and feeds each slice to a copy of the given computation graph and then combines the results.
+        It allows you to run a graph on a batch of inputs even if the graph is written to support one instance only.
+        :param inputs: List of tensors with same first dimension length
+        :param graph_fn: function that returns a TF tensor thats part of a graph
+        :param batch_size: Number of slices to divide the data into
+        :param names: Assigns names to the resulting tensors if provided
+        :return:
+        """
+
+        # Change the inputs to a list
+        if not isinstance(inputs, list): inputs = [inputs]
+
+        outputs = []
+        for i in range(batch_size):
+            inputs_slice = [x[i] for x in inputs]
+            output_slice = graph_fn(*inputs_slice)
+            if not isinstance(output_slice, (tuple, list)): output_slice = [output_slice]
+            outputs.append(output_slice)
+
+        # Change outputs from a list of slices where each is a list of outputs to a list of outputs and each has a list of slices
+        outputs = list(zip(*outputs))
+
+        if names is None: names = [None] * len(outputs)
+
+        result = [tf.stack(o, axis=0, name=n) for o, n in zip(outputs, names)]
+        if len(result) == 1: result = result[0]
+
+        return result
+
+
+    def norm_boxes(self, boxes, shape):
+
+        """
+        Normalizes the pixel coordinates of boxes
+        :param boxes: [N, (y1, x1, y2, x2)] in pixel coordinates
+        :param shape: [..., (height, width)] in pixels
+                Note: In pixel coordinates (y2, x2) is outside the box. But in normalized coordinates it's inside the box.
+        :return: [N, (y1, x1, y2, x2)] in normalized coordinates
+        """
+
+        h, w = shape
+        scale = np.array([h - 1, w - 1, h - 1, w - 1])
+        shift = np.array([0, 0, 1, 1])
+        return np.divide((boxes - shift), scale).astype(np.float32)
+
+
+    def denorm_boxes(self, boxes, shape):
+
+        """
+        Converts boxes from normalized coordinates to pixel coordinates.
+        :param boxes: [N, (y1, x1, y2, x2)] in pixel coordinates
+        :param shape: [..., (height, width)] in pixels
+                Note: In pixel coordinates (y2, x2) is outside the box. But in normalized coordinates it's inside the box.
+        :return: [N, (y1, x1, y2, x2)] in pixel coordinates
+        """
+
+        h, w = shape
+        scale = np.array([h - 1, w - 1, h - 1, w - 1])
+        shift = np.array([0, 0, 1, 1])
+        return np.around(np.multiply(boxes, scale) + shift).astype(np.int32)
