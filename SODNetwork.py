@@ -2795,7 +2795,7 @@ class MRCNN(SODMatrix):
     # Shared class variables here
 
     def __init__(self, phase_train, GPU_count=1, Images_per_gpu=2, FCN=256, K1=32, Num_classes=1, FPN_layers=64,
-                 RPN_anchor_scales= (32), RPN_anchor_ratios = [0.5, 1, 2], RPN_anchor_stride=1,
+                 RPN_anchor_scales= (32), RPN_anchor_ratios = [0.5, 1, 2], RPN_anchor_stride=1, Image_size=512,
                  RPN_nms_upper_threshold = 0.7, RPN_nms_lower_threshold=0.3, RPN_anchors_per_image=256,
                  POST_NMS_ROIS_training=2000, POST_NMS_ROIS_testing=1000, Use_mini_mask=False, Mini_mask_shape = [56, 56]):
 
@@ -2836,6 +2836,7 @@ class MRCNN(SODMatrix):
         self.POST_NMS_ROIS_testing = POST_NMS_ROIS_testing
         self.Use_mini_mask = Use_mini_mask
         self.Mini_mask_shape = Mini_mask_shape
+        self.Image_size = Image_size
 
         # Keeping track of the layers and losses
         self.RPN_conv = None
@@ -2944,11 +2945,10 @@ class MRCNN(SODMatrix):
             pass
 
 
-    def RCNN_RPN(self, FPN_features):
+    def RPN_predict(self):
 
         """
         TODO: Defines the region proposal network
-        :param FPN_features: [] Output for the basenetwork. A collection of feature maps from the FPN
         :return:
                 ROI: Regions of interest
                 RPN_Loss_Object: The loss regaarding whether an object was found
@@ -2964,14 +2964,14 @@ class MRCNN(SODMatrix):
         num_bbox_scores = 2 * num_class_scores
 
         # Loop through the FPN levels
-        for lvl in range(len(FPN_features)):
+        for lvl in range(len(self.conv)):
 
             # To share the head, we need reuse flag and a scope list
             reuse_flag = None if lvl==0 else True
             scope_list = ['RPN_3x3', 'RPN_Classifier', 'RPN_Regressor']
 
             # Now run a 3x3 conv, then separate 1x1 convs for each feature map #TODO: Check if VALID, check BN/Relu
-            rpn_3x3 = self.convolution_RPN(scope_list[0], FPN_features[lvl], 3, self.FPN_layers, phase_train=self.phase_train, reuse=reuse_flag)
+            rpn_3x3 = self.convolution_RPN(scope_list[0], self.conv[lvl], 3, self.FPN_layers, phase_train=self.phase_train, reuse=reuse_flag)
             rpn_class = self.convolution_RPN(scope_list[1], rpn_3x3, 1, num_class_scores, BN=False, relu=False, bias=False, phase_train=self.phase_train, reuse=reuse_flag)
             rpn_box = self.convolution_RPN(scope_list[2], rpn_3x3, 1, num_bbox_scores, BN=False, relu=False, bias=False, phase_train=self.phase_train, reuse=reuse_flag)
 
@@ -2984,11 +2984,64 @@ class MRCNN(SODMatrix):
         return tf.concat(class_logits, axis=0), tf.concat(box_logits, axis=0)
 
 
+    def RCNN_RPN(self):
+
+        """
+        Makes anchors and runs the RPN forward pass
+        :return:
+        """
+
+        # Run the forward pass and generate anchor boxes
+        class_logits, box_logits = self.RPN_predict()
+        anchors = self.make_anchors()
+
+        # Under new name scope (not get_variable), clean up the anchors generated during training
+        with tf.name_scope('RPNN_Forward'):
+            if self.training_phase:
+
+                # Remove outside anchor boxes by returning only the indices of the valid anchors
+                valid_indices = self.filter_outside_anchors(anchors, self.Image_size)
+                valid_anchors = tf.gather(anchors, valid_indices)
+                valid_cls_logits, valid_box_logits = tf.gather(class_logits, valid_indices), tf.gather(box_logits, valid_indices)
+
 
     """
-    Region proposal box generating functions, aka "anchor" functions
+    Region proposal box generating functions, aka "anchor" functions:
+    Make anchors calls generate_anchors for each feature map level in the RPN
     """
 
+    def make_anchors(self):
+
+        # Var scope creates a unique scope for all variables made including with tf.get_variable. name_scope allows reusing of variables
+        with tf.variable_scope('make_anchors'):
+
+            # List of anchors
+            anchor_list, level_list = [], self.conv
+
+            # Name scope doesn't rescope tf.get_variable calls
+            with tf.name_scope('make_anchors_all_levels'):
+
+                # Loop through each FPN feature map scale
+                for FPN_scale in range(len(level_list)):
+
+                    # Stride = usually 1, return feature map size. Use index 2 in case of 3D feature maps
+                    fm_size = tf.shape(self.conv[FPN_scale])[2]
+
+                    # Calculate feature stride
+                    feature_stride = self.Image_size // fm_size
+
+                    # Base anchor sizes match feature map sizes. Generate anchors at this level
+                    anchors = self.generate_anchors([fm_size, fm_size], feature_stride, self.RPN_anchor_ratios, self.RPN_anchor_scales, self.RPN_anchor_stride)
+
+                    # Reshape and append to the list
+                    anchors = tf.reshape(anchors, [-1, 4])
+                    anchor_list.append(anchors)
+
+                all_level_anchors = tf.concat(anchor_list, axis=0)
+
+            return all_level_anchors
+
+    # TODO: Make tensorflow version
     def generate_anchors(self, shape, feature_stride, ratios, scales, anchor_stride):
 
         """
@@ -3029,24 +3082,32 @@ class MRCNN(SODMatrix):
         return boxes
 
 
-    def generate_anchor_pyramid(self, scales, ratios, feature_shapes, feature_strides, anchor_strides):
+    def filter_outside_anchors(self, anchors, img_dim):
 
         """
-        Generate anchors at different feature pyramid levels. Each scale is for 1 level. Each ratio is for all levels.
-        :param scales:
-        :param ratios:
-        :param feature_shapes:
-        :param feature_strides:
-        :param anchor_strides:
-        :return: [N, (y1, x1, y2, x2)] All generated anchors in one aray sorted in order of given scales
+        Removes anchor proposals with values outside the image
+        :param anchors: The anchor proposals [xmin, ymin, xmax, ymax]
+        :param img_dim: image dimensions (assumes square input)
+        :return: the indices of the anchors not outside the image boundary
         """
 
-        # Empty array to hold return values
-        anchors = []
-        for z in range (len(scales)): anchors.append(self.generate_anchors(feature_shapes[z], feature_strides[z], ratios, scales[z], anchor_strides))
+        with tf.name_scope('filter_outside_anchors'):
 
-        # Return the generated anchors for this feature map
-        return np.concatenate(anchors, axis=0)
+            # Unpack the rank R tensor into multiple rank R-1 tensors along axis
+            ymin, xmin, ymax, xmax = tf.unstack(anchors, axis=1)
+
+            # Return True for indices inside the image
+            xmin_index, ymin_index = tf.greater_equal(xmin, 0), tf.greater_equal(ymin, 0)
+            xmax_index, ymax_index = tf.less_equal(xmax, img_dim), tf.less_equal(ymax, img_dim)
+
+            # Now clean up the indices and return them
+            indices = tf.transpose(tf.stack([ymin_index, xmin_index, ymax_index, xmax_index]))
+            indices = tf.cast(indices, dtype=tf.int32)
+            indices = tf.reduce_sum(indices, axis=1)
+            indices = tf.where(tf.equal(indices, tf.shape(boxes)[1]))
+
+            return tf.reshape(indices, [-1, ])
+
 
 
     """
