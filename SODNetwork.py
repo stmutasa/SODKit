@@ -2795,7 +2795,7 @@ class MRCNN(SODMatrix):
     # Shared class variables here
 
     def __init__(self, phase_train, GPU_count=1, Images_per_gpu=2, FCN=256, K1=32, Num_classes=1, FPN_layers=64,
-                 RPN_anchor_scales= (32), RPN_anchor_ratios = [0.5, 1, 2], RPN_anchor_stride=1, Image_size=512,
+                 RPN_anchor_scales= (1, 0.5), RPN_anchor_ratios = [0.5, 1, 2], Image_size=512, RPN_base_anchor_size = [6, 13, 20, 35],
                  RPN_nms_upper_threshold = 0.7, RPN_nms_lower_threshold=0.3, RPN_anchors_per_image=256,
                  POST_NMS_ROIS_training=2000, POST_NMS_ROIS_testing=1000, Use_mini_mask=False, Mini_mask_shape = [56, 56]):
 
@@ -2809,7 +2809,8 @@ class MRCNN(SODMatrix):
         :param Num_classes: Number of classification classes
         :param RPN_anchor_scales: Length of square anchor side in pixels
         :param RPN_anchor_ratios: Ratios of anchors at each cell (width/height) 1 represents a square anchor, and 0.5 is a wide anchor
-        :param RPN_anchor_stride: Anchor stride. 1 = anchors are created for each cell in the backbone feature map. 2 = anchors are created for every other cell
+        :param: Image_size: The size of the input images
+        :param: base_anchor_size: The list of anchor sizes for [32, 64, 128, 256] feature map sizes
         :param RPN_nms_upper_threshold: Non-max suppression threshold to filter RPN proposals. Increase for more proposals
         :param RPN_nms_lower_threshold: Non-min suppression threshold to filter RPN proposals. Decrease for more proposals
         :param RPN_anchors_per_image: ow many anchors per image to use for RPN training
@@ -2828,7 +2829,6 @@ class MRCNN(SODMatrix):
         self.FPN_layers = FPN_layers
         self.RPN_anchor_scales = RPN_anchor_scales
         self.RPN_anchor_ratios = RPN_anchor_ratios
-        self.RPN_anchor_stride = RPN_anchor_stride
         self.RPN_nms_upper_threshold = RPN_nms_upper_threshold
         self.RPN_nms_lower_threshold = RPN_nms_lower_threshold
         self.RPN_anchors_per_image = RPN_anchors_per_image
@@ -2837,6 +2837,7 @@ class MRCNN(SODMatrix):
         self.Use_mini_mask = Use_mini_mask
         self.Mini_mask_shape = Mini_mask_shape
         self.Image_size = Image_size
+        self.RPN_base_anchor_size  = RPN_base_anchor_size
 
         # Keeping track of the layers and losses
         self.RPN_conv = None
@@ -2929,7 +2930,7 @@ class MRCNN(SODMatrix):
         if net_type == 'RESIDUAL':
 
             # Define a ResNet
-            self.resnet = ResNet(nb_blocks=nb_blocks, filters=16, images=input_images, sess=None, phase_train=self.phase_train, summary=True)
+            self.resnet = ResNet(nb_blocks=nb_blocks, filters=self.K1, images=input_images, sess=None, phase_train=self.phase_train, summary=True)
 
             # Make sure all the 64x64 and below feature maps are inception style
             inception_layers = [None] * nb_blocks
@@ -2971,9 +2972,9 @@ class MRCNN(SODMatrix):
             scope_list = ['RPN_3x3', 'RPN_Classifier', 'RPN_Regressor']
 
             # Now run a 3x3 conv, then separate 1x1 convs for each feature map #TODO: Check if VALID, check BN/Relu
-            rpn_3x3 = self.convolution_RPN(scope_list[0], self.conv[lvl], 3, self.FPN_layers, phase_train=self.phase_train, reuse=reuse_flag)
-            rpn_class = self.convolution_RPN(scope_list[1], rpn_3x3, 1, num_class_scores, BN=False, relu=False, bias=False, phase_train=self.phase_train, reuse=reuse_flag)
-            rpn_box = self.convolution_RPN(scope_list[2], rpn_3x3, 1, num_bbox_scores, BN=False, relu=False, bias=False, phase_train=self.phase_train, reuse=reuse_flag)
+            rpn_3x3 = self.convolution_RPN(scope_list[0], self.conv[lvl], 3, self.FPN_layers, phase_train=self.phase_train, reuse=reuse_flag, padding='VALID')
+            rpn_class = self.convolution_RPN(scope_list[1], rpn_3x3, 1, num_class_scores, BN=False, relu=False, bias=False, phase_train=self.phase_train, reuse=reuse_flag, padding='VALID')
+            rpn_box = self.convolution_RPN(scope_list[2], rpn_3x3, 1, num_bbox_scores, BN=False, relu=False, bias=False, phase_train=self.phase_train, reuse=reuse_flag, padding='VALID')
 
             # Reshape the scores and append to the list
             rpn_class, rpn_box = tf.reshape(rpn_class, [-1, 2]), tf.reshape(rpn_box, [-1, 4])
@@ -2993,7 +2994,7 @@ class MRCNN(SODMatrix):
 
         # Run the forward pass and generate anchor boxes
         class_logits, box_logits = self.RPN_predict()
-        anchors = self.make_anchors()
+        anchors = self.make_anchors_FPN()
 
         # Under new name scope (not get_variable), clean up the anchors generated during training
         with tf.name_scope('RPNN_Forward'):
@@ -3004,13 +3005,18 @@ class MRCNN(SODMatrix):
                 valid_anchors = tf.gather(anchors, valid_indices)
                 valid_cls_logits, valid_box_logits = tf.gather(class_logits, valid_indices), tf.gather(box_logits, valid_indices)
 
+                # Return the valid anchors, else during trainign just return the anchors
+                return valid_anchors, valid_cls_logits, valid_box_logits
+
+            else: return anchors, class_logits, box_logits
+
 
     """
     Region proposal box generating functions, aka "anchor" functions:
     Make anchors calls generate_anchors for each feature map level in the RPN
     """
 
-    def make_anchors(self):
+    def make_anchors_FPN(self):
 
         # Var scope creates a unique scope for all variables made including with tf.get_variable. name_scope allows reusing of variables
         with tf.variable_scope('make_anchors'):
@@ -3022,16 +3028,16 @@ class MRCNN(SODMatrix):
             with tf.name_scope('make_anchors_all_levels'):
 
                 # Loop through each FPN feature map scale
-                for FPN_scale in range(len(level_list)):
+                for FPN_scale, base_anchor_size in zip(self.conv, self.RPN_base_anchor_size):
 
                     # Stride = usually 1, return feature map size. Use index 2 in case of 3D feature maps
-                    fm_size = tf.shape(self.conv[FPN_scale])[2]
+                    fm_size = tf.cast(tf.shape(FPN_scale)[2], tf.float32)
 
                     # Calculate feature stride
-                    feature_stride = self.Image_size // fm_size
+                    feature_stride = tf.cast(self.Image_size // fm_size, tf.float32)
 
                     # Base anchor sizes match feature map sizes. Generate anchors at this level
-                    anchors = self.generate_anchors([fm_size, fm_size], feature_stride, self.RPN_anchor_ratios, self.RPN_anchor_scales, self.RPN_anchor_stride)
+                    anchors = self.generate_anchors(fm_size, base_anchor_size, feature_stride, self.RPN_anchor_ratios, self.RPN_anchor_scales)
 
                     # Reshape and append to the list
                     anchors = tf.reshape(anchors, [-1, 4])
@@ -3041,12 +3047,13 @@ class MRCNN(SODMatrix):
 
             return all_level_anchors
 
-    # TODO: Make tensorflow version
-    def generate_anchors(self, shape, feature_stride, ratios, scales, anchor_stride):
+
+    def generate_anchors(self, shape, base_anchor_size, feature_stride, ratios, scales, name='generate_anchors'):
 
         """
-        For generating anchors
-        :param shape: [height, width] spatial shape of the feature map over which to generate anchors
+        For generating anchors inside the tensorflow computation graph
+        :param shape: Spatial shape of the feature map over which to generate anchors
+        :param base_anchor_size: The base anchor size for this feature map
         :param ratios: [1D array] of anchor ratios of width/height. i.e [0.5, 1, 2]
         :param scales: [1D array] of anchor scales in original space
         :param feature_stride: int, stride of feature map relative to the image in pixels
@@ -3054,32 +3061,32 @@ class MRCNN(SODMatrix):
         :return:
         """
 
-        # Get all combinations of scales and ratios
-        scales, ratios = np.meshgrid(np.array(scales), np.array(ratios))
-        scales = scales.flatten()
-        ratios = ratios.flatten()
+        # Define a variable scope
+        with tf.variable_scope(name):
 
-        # Enumerate heights and widths from scales and ratios
-        heights = scales / np.sqrt(ratios)
-        widths = scales * np.sqrt(ratios)
+            # Generate a base anchor
+            base_anchor = tf.constant([0, 0, base_anchor_size, base_anchor_size], tf.float32)
+            base_anchors = self.enum_ratios(self.enum_scales(base_anchor, scales), ratios)
+            _, _, ws, hs = tf.unstack(base_anchors, axis=1)
 
-        # Enumerate shifts in feature space
-        shifts_y = np.arange(0, shape[0], anchor_stride) * feature_stride
-        shifts_x = np.arange(0, shape[1], anchor_stride) * feature_stride
-        shifts_x, shifts_y = np.meshgrid(shifts_x, shifts_y)
+            # Create sequence of numbers
+            x_centers = tf.range(shape, dtype=tf.float32) * feature_stride
+            y_centers = tf.range(shape, dtype=tf.float32) * feature_stride
 
-        # Enumerate combinations of shifts, widths, and heights
-        box_widths, box_centers_x = np.meshgrid(widths, shifts_x)
-        box_heights, box_centers_y = np.meshgrid(heights, shifts_y)
+            # Broadcast parameters to a grid of x and y coordinates
+            x_centers, y_centers = tf.meshgrid(x_centers, y_centers)
+            ws, x_centers = tf.meshgrid(ws, x_centers)
+            hs, y_centers = tf.meshgrid(hs, y_centers)
 
-        # Reshape to get a list of (y, x) and a list of (h, w)
-        box_centers = np.stack([box_centers_y, box_centers_x], axis=2).reshape([-1, 2])
-        box_sizes = np.stack([box_heights, box_widths], axis=2).reshape([-1, 2])
+            # Stack anchor centers and box sizes. Reshape to get a list of (x, y) and a list of (h, w)
+            anchor_centers = tf.reshape(tf.stack([x_centers, y_centers], 2), [-1, 2])
+            box_sizes = tf.reshape(tf.stack([ws, hs], axis=2), [-1, 2])
 
-        # Convert to corner coordinates (y1, x1, y2, x2)
-        boxes = np.concatenate([box_centers - 0.5 * box_sizes, box_centers + 0.5 * box_sizes], axis=1)
+            # Convert to corner coordinates
+            anchors = tf.concat([anchor_centers - 0.5 * box_sizes, anchor_centers + 0.5 * box_sizes], axis=1)
 
-        return boxes
+            return anchors
+
 
 
     def filter_outside_anchors(self, anchors, img_dim):
@@ -3104,7 +3111,7 @@ class MRCNN(SODMatrix):
             indices = tf.transpose(tf.stack([ymin_index, xmin_index, ymax_index, xmax_index]))
             indices = tf.cast(indices, dtype=tf.int32)
             indices = tf.reduce_sum(indices, axis=1)
-            indices = tf.where(tf.equal(indices, tf.shape(boxes)[1]))
+            indices = tf.where(tf.equal(indices, tf.shape(anchors)[1]))
 
             return tf.reshape(indices, [-1, ])
 
@@ -3649,3 +3656,61 @@ class MRCNN(SODMatrix):
         scale = np.array([h - 1, w - 1, h - 1, w - 1])
         shift = np.array([0, 0, 1, 1])
         return np.around(np.multiply(boxes, scale) + shift).astype(np.int32)
+
+
+    def enum_scales(self, base_anchor, anchor_scales, name='enum_scales'):
+
+        '''
+        :param base_anchor: [y_center, x_center, h, w]
+        :param anchor_scales: different scales, like [0.5, 1., 2.0]
+        :return: return base anchors in different scales.
+                Example:[[0, 0, 128, 128],[0, 0, 256, 256],[0, 0, 512, 512]]
+        '''
+        with tf.variable_scope(name):
+
+            anchor_scales = base_anchor * tf.constant(anchor_scales, dtype=tf.float32, shape=(len(anchor_scales), 1))
+            return anchor_scales
+
+    def enum_ratios(self, anchors, anchor_ratios, name='enum_ratios'):
+
+        '''
+        :param anchors: base anchors in different scales
+        :param anchor_ratios:  ratio = h / w
+        :return: base anchors in different scales and ratios
+        '''
+
+        # TODO: May not be necessary to declare variable scope here (already 3 parent scopes)
+        with tf.variable_scope(name):
+
+            # Unstack along the vertical dimension
+            _, _, hs, ws = tf.unstack(anchors, axis=1)
+
+            # Calculate squares of the anchor ratios
+            sqrt_ratios = tf.sqrt(anchor_ratios)
+            sqrt_ratios = tf.expand_dims(sqrt_ratios, axis=1)
+
+            # Reshape the anchors
+            ws = tf.reshape(ws / sqrt_ratios, [-1])
+            hs = tf.reshape(hs * sqrt_ratios, [-1])
+            # assert tf.shape(ws) == tf.shape(hs), 'h shape is not equal w shape'
+
+            num_anchors_per_location = tf.shape(ws)[0]
+
+            return tf.transpose(tf.stack([tf.zeros([num_anchors_per_location, ]), tf.zeros([num_anchors_per_location, ]), ws, hs]))
+
+    # def enum_ratios(self, anchors, anchor_ratios):
+    #
+    #     '''
+    #     ratio = h /w
+    #     :param anchors:
+    #     :param anchor_ratios:
+    #     :return:
+    #     '''
+    #     ws = anchors[:, 2]  # for base anchor: w == h
+    #     hs = anchors[:, 3]
+    #     sqrt_ratios = tf.sqrt(tf.constant(anchor_ratios))
+    #
+    #     ws = tf.reshape(ws / sqrt_ratios[:, tf.newaxis], [-1, 1])
+    #     hs = tf.reshape(hs * sqrt_ratios[:, tf.newaxis], [-1, 1])
+    #
+    #     return hs, ws
