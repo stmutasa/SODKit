@@ -1285,6 +1285,7 @@ class SODLoader():
          Utility functions: Random tools for help
     """
 
+
     def split_dict_equally(self, input_dict, chunks=2):
 
         """
@@ -1309,6 +1310,7 @@ class SODLoader():
                 idx = 0
 
         return return_list
+
 
     def largest_blob(self, img):
         """
