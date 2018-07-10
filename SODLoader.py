@@ -1789,11 +1789,11 @@ class SODLoader():
         :return:
         """
 
-        # If they want to return the folder list, do that
-        if extension == '*': return glob.glob(path + '*')
-
         # If no path specified use the default data root
         if not path: path = self.data_root
+
+        # If they want to return the folder list, do that
+        if extension == '*': return glob.glob(path + '*')
 
         # If we're including subfolders
         if include_subfolders: extension = ('**/*.%s' % extension)
