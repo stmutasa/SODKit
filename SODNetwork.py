@@ -3005,10 +3005,26 @@ class MRCNN(SODMatrix):
                 valid_anchors = tf.gather(anchors, valid_indices)
                 valid_cls_logits, valid_box_logits = tf.gather(class_logits, valid_indices), tf.gather(box_logits, valid_indices)
 
-                # Return the valid anchors, else during trainign just return the anchors
+                # Return the valid anchors, else during training just return the anchors
                 return valid_anchors, valid_cls_logits, valid_box_logits
 
             else: return anchors, class_logits, box_logits
+
+
+    def postprocess_RPN(self):
+
+        """
+        1. Decode
+        2. Clip
+        3. NMS
+        :return:
+        """
+
+        # Set the variable scope
+        with tf.variable_scope('Postprocess_RPN'):
+            pass
+
+
 
 
     """
