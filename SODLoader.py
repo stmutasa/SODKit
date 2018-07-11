@@ -22,6 +22,7 @@ import pandas as pd
 
 from scipy.io import loadmat
 from skimage import morphology
+import imageio
 
 
 class SODLoader():
@@ -179,6 +180,69 @@ class SODLoader():
         except:
             print('For some reason, cant load: %s' % path)
             return
+
+        # Retreive the dimensions of the scan
+        dims = np.array([int(ndimage.Columns), int(ndimage.Rows)])
+
+        # Retreive window level if available
+        try: window = [int(ndimage.WindowCenter), int(ndimage.WindowWidth)]
+        except: window = None
+
+        # Retreive photometric interpretation (1 = negative XRay) if available
+        try: photometric = int(ndimage.PhotometricInterpretation[-1])
+        except: photometric = None
+
+        # Retreive the dummy accession number
+        accno = int(ndimage.AccessionNumber)
+
+        # Finally, make the image actually equal to the pixel data and not the header
+        image = np.asarray(ndimage.pixel_array, dtype)
+
+        # Convert to Houndsfield units if slope and intercept is available:
+        try:
+            # retreive the slope and intercept of this slice
+            slope = ndimage.RescaleSlope
+            intercept = ndimage.RescaleIntercept
+
+            # If the slope isn't 1, rescale the images using the slope
+            if slope != 1:
+                image = slope * image.astype(np.float64)
+                image = image.astype(dtype)
+
+            # Reset the Intercept
+            image += dtype(intercept)
+        except: pass
+
+        return image, accno, dims, window, photometric
+
+
+    def load_BoneAge(self, path, dtype=np.int16):
+
+        """
+        This function loads a 2D DICOM file and stores it into a numpy array. From Bone Age
+        :param path: The path of the DICOM files
+        :param: dtype = what data type to save the image as
+        :return: image = A numpy array of the image
+        :return: accno = the accession number
+        :return: dims = the dimensions of the image
+        :return: window = the window level of the file
+        :return: photometric = the photometric interpretation. 1 = min values white, 2 = min values black
+        """
+
+        # Load the Dicom
+        try:
+            ndimage = dicom.read_file(path)
+        except:
+            print('For some reason, cant load: %s' % path)
+            return
+
+        # # If this is not a hand radiograph, just delete it
+        # NOT ACCURATE - Some hands don't have this flag
+        # try:
+        #     if ('HAND' in ndimage.BodyPartExamined): return
+        # except:
+        #     print('No Body Part listed: ', path)
+        #     return
 
         # Retreive the dimensions of the scan
         dims = np.array([int(ndimage.Columns), int(ndimage.Rows)])
@@ -535,6 +599,19 @@ class SODLoader():
         for key, shuffle in zip(keys, shuffled): batch_dict[key] = shuffle
 
         return batch_dict
+
+
+    def save_image(self, image, path, type=None):
+
+        """
+        Saves an image to disc
+        :param image: Input tensor: can be image, or volume
+        :param path: destination file
+        :param type: for volumes: either a gif or a volumetric image
+        """
+
+        # Way more powerful than this but we will go on a PRN basis
+        imageio.imwrite(path, image)
 
 
     """
