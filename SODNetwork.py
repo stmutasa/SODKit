@@ -2840,12 +2840,13 @@ class MRCNN(SODMatrix):
         self.RPN_base_anchor_size  = RPN_base_anchor_size
 
         # Keeping track of the layers and losses
-        self.RPN_conv = None
         self.RPN_ROI = None
         self.RPN_Loss_Object = None
         self.RPN_Loss_Box = None
         self.RPN_class_logits = None
         self.RPN_bbox_score = None
+        self.Anchors = None
+        self.gt_boxes = None
 
 
     """
@@ -2908,7 +2909,7 @@ class MRCNN(SODMatrix):
             return conv
 
 
-    def RCNN_base(self, input_images, net_type, input_dims, FPN=True):
+    def FPN_Base(self, input_images, net_type, input_dims, FPN=True):
 
         """
         Builds the base feature pyramid network
@@ -2946,7 +2947,7 @@ class MRCNN(SODMatrix):
             pass
 
 
-    def RPN_predict(self):
+    def RPN_conv(self):
 
         """
         TODO: Defines the region proposal network
@@ -2981,11 +2982,13 @@ class MRCNN(SODMatrix):
             class_logits.append(rpn_class)
             box_logits.append(rpn_box)
 
+        cll, bll =  tf.concat(class_logits, axis=0), tf.concat(box_logits, axis=0)
+
         # Return the concatenated list
-        return tf.concat(class_logits, axis=0), tf.concat(box_logits, axis=0)
+        return cll, bll
 
 
-    def RCNN_RPN(self):
+    def RPN_Process(self):
 
         """
         Makes anchors and runs the RPN forward pass
@@ -2993,7 +2996,7 @@ class MRCNN(SODMatrix):
         """
 
         # Run the forward pass and generate anchor boxes
-        class_logits, box_logits = self.RPN_predict()
+        class_logits, box_logits = self.RPN_conv()
         anchors = self.make_anchors_FPN()
 
         # Under new name scope (not get_variable), clean up the anchors generated during training
@@ -3011,21 +3014,65 @@ class MRCNN(SODMatrix):
             else: return anchors, class_logits, box_logits
 
 
-    def postprocess_RPN(self):
+    def RPN_Post_process(self, anchors):
 
         """
-        1. Decode
-        2. Clip
-        3. NMS
+        Find positive and negative samples: Assign anchors as object or background
+        :param anchors: [valid_anchor_num, 4]
         :return:
+                labels, anchors_matched_gtboxes, object_mask
         """
 
         # Set the variable scope
         with tf.variable_scope('Postprocess_RPN'):
-            pass
 
+            # Saved GT boxes as boxes and the FOREGROUND label as last row. (gt_boxes was saved as 5 columns with last as class, not foreground/bkgrnd)
+            gtboxes = tf.reshape(self.gt_boxes[:, :, :-1], [-1, 4])
+            labels = tf.ones(shape=[tf.shape(anchors)[0], ], dtype=tf.float32)*(-1) # ignored is -1
 
+            # Calculate iou. GT boxes are saved as [y1, x1, y2, x2], anchor boxes are saved as the same [hopefully] : Tf default
+            iou = self.iou_calculate(anchors, gtboxes)
 
+            # Retreive the max iou for each anchor (row) and max iou for each gtbox (column)
+            max_iou_each_row = tf.reduce_max(iou, axis=1)
+            max_iou_each_column = tf.reduce_max(iou, axis=0)
+
+            # Retreive matches
+            matches = tf.cast(tf.argmax(iou, axis=1), tf.int32)
+
+            # Retreives positives1 and 2 for anchor with iou > 0.7 (default) and anchors with highest IoUs respectively
+            positives1 = tf.greater_equal(max_iou_each_row, self.RPN_nms_upper_threshold)   # Any iou index > threshold is True
+            positives2 = tf.reduce_sum(tf.cast(tf.equal(iou, max_iou_each_column), tf.float32), axis=1)
+            positives = tf.logical_or(positives1, tf.cast(positives2, tf.bool))
+
+            # Update labels with positive indices. Pos = 1, ignored and bkgrnd = -1
+            labels += 2 * tf.cast(positives, tf.float32)
+
+            # Retreive the matched anchors after removing the background and ignored
+            matches = matches * tf.cast(positives, dtype=matches.dtype) # Optional??
+            anchors_matched_gtboxes = tf.gather(gtboxes, matches)
+
+            # Retreive the negatives with iou < 0.3 (default)
+            negatives = tf.less(max_iou_each_row, self.RPN_nms_lower_threshold)
+            negatives = tf.logical_and(negatives, tf.greater_equal(max_iou_each_row, 0.1))
+
+            # Update the labels with the negatives: +ive = 1, -ive = 0, ignored = -1
+            labels = labels + tf.cast(negatives, tf.float32)
+            positives = tf.cast(tf.greater_equal(labels, 1.0), tf.float32)
+            ignored = tf.cast(tf.equal(labels, -1.0), tf.float32) * (-1)
+            labels = positives + ignored
+
+            '''
+            Please note that when positive, labels may be >= 1.0: 
+            Labels all start at -1
+            If all iou < 0.7, the max anchor is set as positive and gets a +2.0 (==1.0)
+            If that anchor also has iou < 0.3 it gets another +1.0 (==2.0)
+            '''
+
+            # Object mask: 1.0 is object, 0.0 is other
+            object_mask = tf.cast(positives, tf.float32)
+
+            return labels, anchors_matched_gtboxes, object_mask
 
     """
     Region proposal box generating functions, aka "anchor" functions:
@@ -3033,6 +3080,11 @@ class MRCNN(SODMatrix):
     """
 
     def make_anchors_FPN(self):
+
+        """
+        Makes anchors from all levels of the feature pyramid network
+        :return:
+        """
 
         # Var scope creates a unique scope for all variables made including with tf.get_variable. name_scope allows reusing of variables
         with tf.variable_scope('make_anchors'):
@@ -3070,10 +3122,9 @@ class MRCNN(SODMatrix):
         For generating anchors inside the tensorflow computation graph
         :param shape: Spatial shape of the feature map over which to generate anchors
         :param base_anchor_size: The base anchor size for this feature map
+        :param feature_stride: int, stride of feature map relative to the image in pixels
         :param ratios: [1D array] of anchor ratios of width/height. i.e [0.5, 1, 2]
         :param scales: [1D array] of anchor scales in original space
-        :param feature_stride: int, stride of feature map relative to the image in pixels
-        :param anchor_stride: int, stride of anchors on the feature map
         :return:
         """
 
@@ -3104,7 +3155,6 @@ class MRCNN(SODMatrix):
             return anchors
 
 
-
     def filter_outside_anchors(self, anchors, img_dim):
 
         """
@@ -3132,10 +3182,46 @@ class MRCNN(SODMatrix):
             return tf.reshape(indices, [-1, ])
 
 
-
     """
     Bounding box functions
     """
+
+    def iou_calculate(self, boxes1, boxes2):
+
+        """
+        Calculates the IOU of two boxes
+        :param boxes1: [n, 4] [ymin, xmin, ymax, xmax]
+        :param boxes2: [n, 4]
+        :return: Overlaps of each box pair (aka DICE score)
+        """
+
+        # Just a name scope this time
+        with tf.name_scope('iou_calculate'):
+
+            # Split the coordinates
+            ymin_1, xmin_1, ymax_1, xmax_1 = tf.split(boxes1, 4, axis=1)  # ymin_1 shape is [N, 1]..
+            ymin_2, xmin_2, ymax_2, xmax_2 = tf.unstack(boxes2, axis=1)  # ymin_2 shape is [M, ]..
+
+            # Retreive any overlaps of the corner points of the box
+            max_xmin, max_ymin = tf.maximum(xmin_1, xmin_2), tf.maximum(ymin_1, ymin_2)
+            min_xmax, min_ymax = tf.minimum(xmax_1, xmax_2), tf.minimum(ymax_1, ymax_2)
+
+            # Retreive overlap along each dimension: Basically if the upper right corner of one box is above the lower left of another, there is overlap
+            overlap_h = tf.maximum(0., min_ymax - max_ymin)  # avoid h < 0
+            overlap_w = tf.maximum(0., min_xmax - max_xmin)
+
+            # Cannot overlap if one of the dimension overlaps is 0
+            overlaps = overlap_h * overlap_w
+
+            # Calculate the area of each box
+            area_1 = (xmax_1 - xmin_1) * (ymax_1 - ymin_1)  # [N, 1]
+            area_2 = (xmax_2 - xmin_2) * (ymax_2 - ymin_2)  # [M, ]
+
+            # Calculate overlap (intersection) over union like Dice score. Union is just the areas added minus the overlap
+            iou = overlaps / (area_1 + area_2 - overlaps)
+
+            return iou
+
 
     def extract_box_labels(self, mask, dim_3d=False):
 
@@ -3221,50 +3307,6 @@ class MRCNN(SODMatrix):
                 boxes[z] = np.array([y1, x1, y2, x2])
 
             return boxes.astype(np.int32)
-
-
-    def calculate_iou(self, box, boxes, box_area, boxes_area):
-
-        """
-        Function that calculates intersection over union of the given box with the given array of boxes
-        :param box: The given box corner coordinates [y1, x1, y2, x2]
-        :param boxes: Boxes to check [N, (y1, x1, y2, x2)]
-        :param box_area: float, the area of 'box'
-        :param boxes_area: array of length boxes_count
-        :return: intersection over union
-        """
-
-        # retreive box coordinates
-        y1, y2 = np.maximum(box[0], boxes[:, 0]), np.minimum(box[2], boxes[:, 2])
-        x1, x2 = np.maximum(box[1], boxes[:, 1]), np.minimum(box[3], boxes[:, 3])
-
-        # Calculate the intersection over union
-        intersection = np.maximum(x2 - x1, 0) * np.maximum(y2 - y1, 0)
-        union = box_area + boxes_area[:] - intersection[:]
-
-        return intersection / union
-
-
-    def calculate_overlaps_IoU_boxes(self, boxes1, boxes2):
-
-        """
-        Calculates the IoU overlaps between two sets of boxes. Pass smaller set second for best performance
-        :param boxes1: [N, (y1, x1, y2, x2)].
-        :param boxes2: [N, (y1, x1, y2, x2)].
-        :return: overlaps
-        """
-
-        # Area of anchors and ground truth boxes
-        area1 = (boxes1[:, 2] - boxes1[:, 0]) * (boxes1[:, 3] - boxes1[:, 1])
-        area2 = (boxes2[:, 2] - boxes2[:, 0]) * (boxes2[:, 3] - boxes2[:, 1])
-
-        # Compute overlaps to generate matrix [boxes1 count, boxes2 count] where each cell contains the IoU value.
-        overlaps = np.zeros((boxes1.shape[0], boxes2.shape[0]))
-        for i in range(overlaps.shape[1]):
-            box2 = boxes2[i]
-            overlaps[:, i] = self.calculate_iou(box2, boxes1, area2[i], area1)
-
-        return overlaps
 
 
     def calculate_overlaps_mask_box(self, mask, box):
@@ -3687,6 +3729,7 @@ class MRCNN(SODMatrix):
             anchor_scales = base_anchor * tf.constant(anchor_scales, dtype=tf.float32, shape=(len(anchor_scales), 1))
             return anchor_scales
 
+
     def enum_ratios(self, anchors, anchor_ratios, name='enum_ratios'):
 
         '''
@@ -3713,20 +3756,3 @@ class MRCNN(SODMatrix):
             num_anchors_per_location = tf.shape(ws)[0]
 
             return tf.transpose(tf.stack([tf.zeros([num_anchors_per_location, ]), tf.zeros([num_anchors_per_location, ]), ws, hs]))
-
-    # def enum_ratios(self, anchors, anchor_ratios):
-    #
-    #     '''
-    #     ratio = h /w
-    #     :param anchors:
-    #     :param anchor_ratios:
-    #     :return:
-    #     '''
-    #     ws = anchors[:, 2]  # for base anchor: w == h
-    #     hs = anchors[:, 3]
-    #     sqrt_ratios = tf.sqrt(tf.constant(anchor_ratios))
-    #
-    #     ws = tf.reshape(ws / sqrt_ratios[:, tf.newaxis], [-1, 1])
-    #     hs = tf.reshape(hs * sqrt_ratios[:, tf.newaxis], [-1, 1])
-    #
-    #     return hs, ws
