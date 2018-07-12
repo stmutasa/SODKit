@@ -1,6 +1,3 @@
-README IS OUT OF DATE
-But you can still use it as an example of what functions are available
-
 SODKit Base classes:
 
 SODLoader contains functions for loading and preprocessing files. Everything from loading a 3d or 2d DICOM to normalizing MRI images to saving a numpy dictionary in a binary format.
