@@ -2797,23 +2797,33 @@ class MRCNN(SODMatrix):
     def __init__(self, phase_train, GPU_count=1, Images_per_gpu=2, FCN=256, K1=32, Num_classes=1, FPN_layers=64,
                  RPN_anchor_scales= (1, 0.5), RPN_anchor_ratios = [0.5, 1, 2], Image_size=512, RPN_base_anchor_size = [6, 13, 20, 35],
                  RPN_nms_upper_threshold = 0.7, RPN_nms_lower_threshold=0.3, RPN_anchors_per_image=256,
+                 batch_size=8, max_proposals=32, RPN_batch_size=256, RPN_batch_positives_ratio=0.5,
                  POST_NMS_ROIS_training=2000, POST_NMS_ROIS_testing=1000, Use_mini_mask=False, Mini_mask_shape = [56, 56]):
 
         """
         Instance specific variables
+
         :param phase_train: Training or testing mode
-        :param GPU_count: Numbger of GPUs to use
-        :param Images_per_gpu: Number of images to train with on each GPU. Use highest number gpu can handle
         :param FCN: Number of neurons in the first fully connected layer
         :param K1: Number of filters in the first layer
-        :param Num_classes: Number of classification classes
+        :param Num_classes: Number of classification classes. Does not include the background category
+        :param FPN_layers: The number of layers in the FPN outputs
+
+        :param: Image_size: The size of the input images
+        :param batch_size: the batch size of the whole network
+        :param max_proposals: The number of proposals per batch
+        :param GPU_count: Number of GPUs to use
+        :param Images_per_gpu: Number of images to train with on each GPU. Use highest number gpu can handle
+
         :param RPN_anchor_scales: Length of square anchor side in pixels
         :param RPN_anchor_ratios: Ratios of anchors at each cell (width/height) 1 represents a square anchor, and 0.5 is a wide anchor
-        :param: Image_size: The size of the input images
-        :param: base_anchor_size: The list of anchor sizes for [32, 64, 128, 256] feature map sizes
+        :param: RPN_base_anchor_size: The list of anchor sizes for [32, 64, 128, 256] feature map sizes
         :param RPN_nms_upper_threshold: Non-max suppression threshold to filter RPN proposals. Increase for more proposals
         :param RPN_nms_lower_threshold: Non-min suppression threshold to filter RPN proposals. Decrease for more proposals
-        :param RPN_anchors_per_image: ow many anchors per image to use for RPN training
+        :param RPN_anchors_per_image: how many anchors per image to use for RPN training
+        :param RPN_batch_size: The batch size of the region proposal network otuput
+        :param RPN_batch_positives_ratio: The ratio of positives in the RPN output batch
+
         :param POST_NMS_ROIS_training: ROIs kept after non-maximum supression (training)
         :param POST_NMS_ROIS_testing: ROIs kept after non-maximum supression (inference)
         :param Use_mini_mask: If enabled, resizes instance masks to a smaller size to reduce memory usage
@@ -2827,89 +2837,39 @@ class MRCNN(SODMatrix):
         self.K1 = K1
         self.Num_classes = Num_classes
         self.FPN_layers = FPN_layers
+
         self.RPN_anchor_scales = RPN_anchor_scales
         self.RPN_anchor_ratios = RPN_anchor_ratios
         self.RPN_nms_upper_threshold = RPN_nms_upper_threshold
         self.RPN_nms_lower_threshold = RPN_nms_lower_threshold
         self.RPN_anchors_per_image = RPN_anchors_per_image
+        self.RPN_batch_positives_ratio = RPN_batch_positives_ratio
+        self.RPN_batch_size = RPN_batch_size
+
         self.POST_NMS_ROIS_training = POST_NMS_ROIS_training
         self.POST_NMS_ROIS_testing = POST_NMS_ROIS_testing
         self.Use_mini_mask = Use_mini_mask
         self.Mini_mask_shape = Mini_mask_shape
         self.Image_size = Image_size
         self.RPN_base_anchor_size  = RPN_base_anchor_size
+        self.batch_size = batch_size
+        self.max_proposals = max_proposals
 
         # Keeping track of the layers and losses
-        self.RPN_ROI = None
-        self.RPN_Loss_Object = None
-        self.RPN_Loss_Box = None
-        self.RPN_class_logits = None
-        self.RPN_bbox_score = None
-        self.Anchors = None
-        self.gt_boxes = None
+        # self.RPN_ROI = None
+        # self.RPN_Loss_Object = None
+        # self.RPN_Loss_Box = None
+        # self.RPN_class_logits = None
+        # self.RPN_bbox_score = None
+        # self.Anchors = None
+        # self.gt_boxes = None
 
 
     """
     Baseline Networks
     """
 
-    # Overwrite the convolution function wrapper to include the reuse flag for our RPN to work on a FPN output. Remove downsample and dropout
-    def convolution_RPN(self, scope, X, F, K, S=1, padding='SAME', phase_train=None, BN=True, relu=True, bias=True, reuse=None, summary=True):
-        """
-        This is a wrapper for convolutions
-        :param scope:
-        :param X: Output of the prior layer
-        :param F: Convolutional filter size
-        :param K: Number of feature maps
-        :param S: Stride
-        :param padding: 'SAME' or 'VALID'
-        :param phase_train: For batch norm implementation
-        :param BN: whether to perform batch normalization
-        :param relu: bool, whether to do the activation function at the end
-        :param bias: whether to include a bias term
-        :param reuse: wehther we will be reusing this layer
-        :param summary: whether to output a summary
-        :return:
-        """
-
-        # Set channel size based on input depth
-        C = X.get_shape().as_list()[-1]
-        B = X.get_shape().as_list()[0]
-
-        # Set the scope
-        with tf.variable_scope(scope, reuse=reuse) as scope:
-
-            # Set training phase variable
-            self.training_phase = phase_train
-
-            # Define the Kernel. Can use Xavier init: contrib.layers.xavier_initializer())
-            kernel = tf.get_variable('Weights', shape=[F, F, C, K], initializer=tf.contrib.layers.variance_scaling_initializer())
-
-            # Add to the weights collection
-            tf.add_to_collection('weights', kernel)
-
-            # Perform the actual convolution
-            conv = tf.nn.conv2d(X, kernel, [1, S, S, 1], padding=padding)
-
-            # Add in the bias
-            if bias:
-                bias = tf.get_variable('Bias', shape=[K], initializer=tf.constant_initializer(0.0))
-                tf.add_to_collection('biases', bias)
-                conv = tf.nn.bias_add(conv, bias)
-
-            # Relu activation
-            if relu: conv = tf.nn.relu(conv, name=scope.name)
-
-            # Apply the batch normalization. Updates weights during training phase only
-            if BN: conv = self.batch_normalization(conv, phase_train, scope)
-
-            # Create a histogram/scalar summary of the conv1 layer
-            if summary: self._activation_summary(conv)
-
-            return conv
-
-
-    def FPN_Base(self, input_images, net_type, input_dims, FPN=True):
+    def Generate_FPN(self, input_images, net_type, input_dims, FPN=True):
 
         """
         Builds the base feature pyramid network
@@ -2938,16 +2898,197 @@ class MRCNN(SODMatrix):
             inception_layers[-1], inception_layers[-2] = 1, 1
 
             # Define the downsample network and retreive the output of each block #TODO: Fix class inheritence and FPN layers
-            if FPN: final_conv, self.conv = self.resnet.define_network(block_sizes, inception_layers, FPN=True, FPN_layers=self.FPN_layers)
-            else: final_conv, self.conv = self.resnet.define_network(block_sizes, inception_layers, FPN=False)
-
-            return final_conv, self.conv
+            if FPN: _, self.conv = self.resnet.define_network(block_sizes, inception_layers, FPN=True, FPN_layers=self.FPN_layers)
+            else: _, self.conv = self.resnet.define_network(block_sizes, inception_layers, FPN=False)
 
         if net_type == 'DENSE':
             pass
 
 
-    def RPN_conv(self):
+    def RPN_Process(self):
+
+        """
+        Makes anchors and runs the RPN forward pass
+        TODO: Prune anchors outside image window at train. Clip anchors to image window at test time.
+        :return:
+        """
+
+        # Run the forward pass and generate anchor boxes
+        class_logits, box_logits = self._RPN_conv()
+        anchors = self._make_anchors_FPN()
+
+        # Under new name scope (not get_variable), clean up the anchors generated during training
+        with tf.name_scope('RPNN_Forward'):
+            if self.training_phase:
+
+                # Remove outside anchor boxes by returning only the indices of the valid anchors
+                valid_indices = self._filter_outside_anchors(anchors, self.Image_size)
+                valid_anchors = tf.gather(anchors, valid_indices)
+                valid_cls_logits, valid_box_logits = tf.gather(class_logits, valid_indices), tf.gather(box_logits, valid_indices)
+
+                # Return the valid anchors, else during training just return the anchors
+                self.anchors, self.RPN_class_logits, self.RPN_box_logits = valid_anchors, valid_cls_logits, valid_box_logits
+
+            else: self.anchors, self.RPN_class_logits, self.RPN_box_logits = anchors, class_logits, box_logits
+
+
+    def RPN_Post_process(self, summary=None):
+
+        """
+        Calculates the RPN losses after processing the proposals and making a minibatch
+        :param summary: Whether to print a summary image to tensorboard
+        :return:
+        """
+
+        with tf.variable_scope('RPN_Losses'):
+
+            # Run the post processing functions to retreive the gneerated minibatches from the RPN
+            minibatch_indices, minibatch_anchor_matched_gtboxes, object_mask, minibatch_labels_one_hot = self._RPN_make_minibatch(self.anchors)
+            negative_object_mask = tf.cast(tf.logical_not(tf.cast(object_mask, tf.bool)), tf.float32)
+
+            # Gather the anchors and logits that made it into the generated minibatch
+            minibatch_anchors = tf.gather(self.anchors, minibatch_indices)
+            minibatch_class_logits = tf.gather(self.RPN_class_logits, minibatch_indices)
+            minibatch_box_logits = tf.gather(self.RPN_box_logits, minibatch_indices)
+
+            # Calculate deltas required to transform anchors to gtboxes, aka the loss
+            minibatch_encoded_gtboxes = self._encode(minibatch_anchor_matched_gtboxes, minibatch_anchors)
+            minibatch_decoded_boxes = self._decode(minibatch_encoded_gtboxes, minibatch_anchors)
+
+            # TODO: if we want to generate a summary image
+            if summary:
+
+                # # Draw tensorboard summary boxes
+                # positive_anchors_in_img = draw_box_with_color()
+                # negative_anchors_in_img = draw_box_with_color()
+                # tf.summary.image('/positive_anchors', positive_anchors_in_img)
+                # tf.summary.image('/negative_anchors', negative_anchors_in_img)
+                pass
+
+            # Now for the losses
+            with tf.variable_scope('rpn_location_loss'):
+
+                # First calculate the smooth L1 location loss and save
+                location_loss = self._smooth_l1_loss(minibatch_box_logits, minibatch_encoded_gtboxes, object_mask)
+                tf.add_to_collection('losses', location_loss)
+
+            # Now calculate softmax loss and save
+            with tf.variable_scope('rpn_classifcation_loss'):
+
+                classification_loss = tf.nn.softmax_cross_entropy_with_logits_v2(labels=minibatch_labels_one_hot, logits=minibatch_class_logits)
+                tf.add_to_collection('losses', classification_loss)
+
+            return location_loss, classification_loss
+
+
+    """
+    RPN hidden Inside functions
+    """
+
+    def _make_anchors_FPN(self):
+
+        """
+        Makes anchors from all levels of the feature pyramid network
+        :return:
+        """
+
+        # Var scope creates a unique scope for all variables made including with tf.get_variable. name_scope allows reusing of variables
+        with tf.variable_scope('make_anchors'):
+
+            # List of anchors
+            anchor_list, level_list = [], self.conv
+
+            # Name scope doesn't rescope tf.get_variable calls
+            with tf.name_scope('make_anchors_all_levels'):
+
+                # Loop through each FPN feature map scale
+                for FPN_scale, base_anchor_size in zip(self.conv, self.RPN_base_anchor_size):
+
+                    # Stride = usually 1, return feature map size. Use index 2 in case of 3D feature maps
+                    fm_size = tf.cast(tf.shape(FPN_scale)[2], tf.float32)
+
+                    # Calculate feature stride
+                    feature_stride = tf.cast(self.Image_size // fm_size, tf.float32)
+
+                    # Base anchor sizes match feature map sizes. Generate anchors at this level
+                    anchors = self._generate_anchors(fm_size, base_anchor_size, feature_stride, self.RPN_anchor_ratios, self.RPN_anchor_scales)
+
+                    # Reshape and append to the list
+                    anchors = tf.reshape(anchors, [-1, 4])
+                    anchor_list.append(anchors)
+
+                all_level_anchors = tf.concat(anchor_list, axis=0)
+
+            return all_level_anchors
+
+
+    def _generate_anchors(self, shape, base_anchor_size, feature_stride, ratios, scales, name='generate_anchors'):
+
+        """
+        For generating anchors inside the tensorflow computation graph
+        :param shape: Spatial shape of the feature map over which to generate anchors
+        :param base_anchor_size: The base anchor size for this feature map
+        :param feature_stride: int, stride of feature map relative to the image in pixels
+        :param ratios: [1D array] of anchor ratios of width/height. i.e [0.5, 1, 2]
+        :param scales: [1D array] of anchor scales in original space
+        :return:
+        """
+
+        # Define a variable scope
+        with tf.variable_scope(name):
+
+            # Generate a base anchor
+            base_anchor = tf.constant([0, 0, base_anchor_size, base_anchor_size], tf.float32)
+            base_anchors = self._enum_ratios(self._enum_scales(base_anchor, scales), ratios)
+            _, _, ws, hs = tf.unstack(base_anchors, axis=1)
+
+            # Create sequence of numbers
+            x_centers = tf.range(shape, dtype=tf.float32) * feature_stride
+            y_centers = tf.range(shape, dtype=tf.float32) * feature_stride
+
+            # Broadcast parameters to a grid of x and y coordinates
+            x_centers, y_centers = tf.meshgrid(x_centers, y_centers)
+            ws, x_centers = tf.meshgrid(ws, x_centers)
+            hs, y_centers = tf.meshgrid(hs, y_centers)
+
+            # Stack anchor centers and box sizes. Reshape to get a list of (x, y) and a list of (h, w)
+            anchor_centers = tf.reshape(tf.stack([x_centers, y_centers], 2), [-1, 2])
+            box_sizes = tf.reshape(tf.stack([ws, hs], axis=2), [-1, 2])
+
+            # Convert to corner coordinates
+            anchors = tf.concat([anchor_centers - 0.5 * box_sizes, anchor_centers + 0.5 * box_sizes], axis=1)
+
+            return anchors
+
+
+    def _filter_outside_anchors(self, anchors, img_dim):
+
+        """
+        Removes anchor proposals with values outside the image
+        :param anchors: The anchor proposals [xmin, ymin, xmax, ymax]
+        :param img_dim: image dimensions (assumes square input)
+        :return: the indices of the anchors not outside the image boundary
+        """
+
+        with tf.name_scope('filter_outside_anchors'):
+
+            # Unpack the rank R tensor into multiple rank R-1 tensors along axis
+            ymin, xmin, ymax, xmax = tf.unstack(anchors, axis=1)
+
+            # Return True for indices inside the image
+            xmin_index, ymin_index = tf.greater_equal(xmin, 0), tf.greater_equal(ymin, 0)
+            xmax_index, ymax_index = tf.less_equal(xmax, img_dim), tf.less_equal(ymax, img_dim)
+
+            # Now clean up the indices and return them
+            indices = tf.transpose(tf.stack([ymin_index, xmin_index, ymax_index, xmax_index]))
+            indices = tf.cast(indices, dtype=tf.int32)
+            indices = tf.reduce_sum(indices, axis=1)
+            indices = tf.where(tf.equal(indices, tf.shape(anchors)[1]))
+
+            return tf.reshape(indices, [-1, ])
+
+
+    def _RPN_conv(self):
 
         """
         TODO: Defines the region proposal network
@@ -2973,9 +3114,9 @@ class MRCNN(SODMatrix):
             scope_list = ['RPN_3x3', 'RPN_Classifier', 'RPN_Regressor']
 
             # Now run a 3x3 conv, then separate 1x1 convs for each feature map #TODO: Check if VALID, check BN/Relu
-            rpn_3x3 = self.convolution_RPN(scope_list[0], self.conv[lvl], 3, self.FPN_layers, phase_train=self.phase_train, reuse=reuse_flag, padding='VALID')
-            rpn_class = self.convolution_RPN(scope_list[1], rpn_3x3, 1, num_class_scores, BN=False, relu=False, bias=False, phase_train=self.phase_train, reuse=reuse_flag, padding='VALID')
-            rpn_box = self.convolution_RPN(scope_list[2], rpn_3x3, 1, num_bbox_scores, BN=False, relu=False, bias=False, phase_train=self.phase_train, reuse=reuse_flag, padding='VALID')
+            rpn_3x3 = self._convolution_RPN(scope_list[0], self.conv[lvl], 3, self.FPN_layers, phase_train=self.phase_train, reuse=reuse_flag, padding='VALID')
+            rpn_class = self._convolution_RPN(scope_list[1], rpn_3x3, 1, num_class_scores, BN=False, relu=False, bias=False, phase_train=self.phase_train, reuse=reuse_flag, padding='VALID')
+            rpn_box = self._convolution_RPN(scope_list[2], rpn_3x3, 1, num_bbox_scores, BN=False, relu=False, bias=False, phase_train=self.phase_train, reuse=reuse_flag, padding='VALID')
 
             # Reshape the scores and append to the list
             rpn_class, rpn_box = tf.reshape(rpn_class, [-1, 2]), tf.reshape(rpn_box, [-1, 4])
@@ -2988,33 +3129,7 @@ class MRCNN(SODMatrix):
         return cll, bll
 
 
-    def RPN_Process(self):
-
-        """
-        Makes anchors and runs the RPN forward pass
-        :return:
-        """
-
-        # Run the forward pass and generate anchor boxes
-        class_logits, box_logits = self.RPN_conv()
-        anchors = self.make_anchors_FPN()
-
-        # Under new name scope (not get_variable), clean up the anchors generated during training
-        with tf.name_scope('RPNN_Forward'):
-            if self.training_phase:
-
-                # Remove outside anchor boxes by returning only the indices of the valid anchors
-                valid_indices = self.filter_outside_anchors(anchors, self.Image_size)
-                valid_anchors = tf.gather(anchors, valid_indices)
-                valid_cls_logits, valid_box_logits = tf.gather(class_logits, valid_indices), tf.gather(box_logits, valid_indices)
-
-                # Return the valid anchors, else during training just return the anchors
-                return valid_anchors, valid_cls_logits, valid_box_logits
-
-            else: return anchors, class_logits, box_logits
-
-
-    def RPN_Post_process(self, anchors):
+    def _process_proposals(self, anchors):
 
         """
         Find positive and negative samples: Assign anchors as object or background
@@ -3072,114 +3187,63 @@ class MRCNN(SODMatrix):
             # Object mask: 1.0 is object, 0.0 is other
             object_mask = tf.cast(positives, tf.float32)
 
+            # TODO: Glitch returning the same boxes
             return labels, anchors_matched_gtboxes, object_mask
 
-    """
-    Region proposal box generating functions, aka "anchor" functions:
-    Make anchors calls generate_anchors for each feature map level in the RPN
-    """
 
-    def make_anchors_FPN(self):
+    def _RPN_make_minibatch(self, valid_anchors):
 
         """
-        Makes anchors from all levels of the feature pyramid network
+        Takes the valid anchors and generates a minibatch for the RPN with a certain amount of positives and negatives
+        :param valid_anchors:
         :return:
         """
 
-        # Var scope creates a unique scope for all variables made including with tf.get_variable. name_scope allows reusing of variables
-        with tf.variable_scope('make_anchors'):
+        with tf.variable_scope('rpn_minibatch'):
+            # TODO Make sure we only include x number from each example in the minibatch
 
-            # List of anchors
-            anchor_list, level_list = [], self.conv
+            # Label shape is [N,: ] where 1/2 is positive, 0 is negative and -1 is ignored.
+            labels, anchors_matched_gtboxes, object_mask = self._process_proposals(valid_anchors)
 
-            # Name scope doesn't rescope tf.get_variable calls
-            with tf.name_scope('make_anchors_all_levels'):
+            # Positive indices are labels >= 1.0, reshape to vector
+            positive_indices = tf.reshape(tf.where(tf.greater_equal(labels, 1.0)), [-1])
 
-                # Loop through each FPN feature map scale
-                for FPN_scale, base_anchor_size in zip(self.conv, self.RPN_base_anchor_size):
+            # Calculate the number of positives to include. Use them all unless there are too many
+            num_positives = tf.minimum(tf.shape(positive_indices)[0], tf.cast(self.RPN_batch_positives_ratio * self.RPN_batch_size, tf.int32))
 
-                    # Stride = usually 1, return feature map size. Use index 2 in case of 3D feature maps
-                    fm_size = tf.cast(tf.shape(FPN_scale)[2], tf.float32)
+            # Retreive a random selection of the positives and negatives
+            positive_indices, negative_indices = tf.random_shuffle(positive_indices), tf.reshape(tf.where(tf.equal(labels, 0.0)), [-1])
+            positive_indices = tf.slice(positive_indices, begin=[0], size=[num_positives])
+            num_negatives = tf.minimum(self.RPN_batch_size - num_positives, tf.shape(negative_indices)[0])
+            negative_indices = tf.slice(tf.random_shuffle(negative_indices), begin=[0], size=num_negatives)
 
-                    # Calculate feature stride
-                    feature_stride = tf.cast(self.Image_size // fm_size, tf.float32)
+            # Join together to create the minibatch indices and randomize
+            minibatch_indices = tf.concat([positive_indices, negative_indices], axis=0)
+            minibatch_indices = tf.random_shuffle(minibatch_indices)
 
-                    # Base anchor sizes match feature map sizes. Generate anchors at this level
-                    anchors = self.generate_anchors(fm_size, base_anchor_size, feature_stride, self.RPN_anchor_ratios, self.RPN_anchor_scales)
+            # Retreive the ground truth boxes for the indices in the generated minibatch
+            minibatch_anchor_matched_gtboxes = tf.gather(anchors_matched_gtboxes, minibatch_indices)
 
-                    # Reshape and append to the list
-                    anchors = tf.reshape(anchors, [-1, 4])
-                    anchor_list.append(anchors)
+            # Regenerate the labels and object mask for the indices that actually made it to the minibatch
+            object_mask = tf.gather(object_mask, minibatch_indices)
+            labels = tf.cast(tf.gather(labels, minibatch_indices), tf.int32)
 
-                all_level_anchors = tf.concat(anchor_list, axis=0)
+            # Make labels one hot
+            labels_one_hot = tf.one_hot(labels, depth=2)
 
-            return all_level_anchors
+            return minibatch_indices, minibatch_anchor_matched_gtboxes, object_mask, labels_one_hot
 
 
-    def generate_anchors(self, shape, base_anchor_size, feature_stride, ratios, scales, name='generate_anchors'):
+    def _smooth_l1_loss(self, predicted_boxes, gtboxes, object_weights):
 
         """
-        For generating anchors inside the tensorflow computation graph
-        :param shape: Spatial shape of the feature map over which to generate anchors
-        :param base_anchor_size: The base anchor size for this feature map
-        :param feature_stride: int, stride of feature map relative to the image in pixels
-        :param ratios: [1D array] of anchor ratios of width/height. i.e [0.5, 1, 2]
-        :param scales: [1D array] of anchor scales in original space
+        TODO: Calculates the smooth L1 losses
+        :param predicted_boxes:
+        :param gtboxes:
+        :param object_weights:
         :return:
         """
-
-        # Define a variable scope
-        with tf.variable_scope(name):
-
-            # Generate a base anchor
-            base_anchor = tf.constant([0, 0, base_anchor_size, base_anchor_size], tf.float32)
-            base_anchors = self.enum_ratios(self.enum_scales(base_anchor, scales), ratios)
-            _, _, ws, hs = tf.unstack(base_anchors, axis=1)
-
-            # Create sequence of numbers
-            x_centers = tf.range(shape, dtype=tf.float32) * feature_stride
-            y_centers = tf.range(shape, dtype=tf.float32) * feature_stride
-
-            # Broadcast parameters to a grid of x and y coordinates
-            x_centers, y_centers = tf.meshgrid(x_centers, y_centers)
-            ws, x_centers = tf.meshgrid(ws, x_centers)
-            hs, y_centers = tf.meshgrid(hs, y_centers)
-
-            # Stack anchor centers and box sizes. Reshape to get a list of (x, y) and a list of (h, w)
-            anchor_centers = tf.reshape(tf.stack([x_centers, y_centers], 2), [-1, 2])
-            box_sizes = tf.reshape(tf.stack([ws, hs], axis=2), [-1, 2])
-
-            # Convert to corner coordinates
-            anchors = tf.concat([anchor_centers - 0.5 * box_sizes, anchor_centers + 0.5 * box_sizes], axis=1)
-
-            return anchors
-
-
-    def filter_outside_anchors(self, anchors, img_dim):
-
-        """
-        Removes anchor proposals with values outside the image
-        :param anchors: The anchor proposals [xmin, ymin, xmax, ymax]
-        :param img_dim: image dimensions (assumes square input)
-        :return: the indices of the anchors not outside the image boundary
-        """
-
-        with tf.name_scope('filter_outside_anchors'):
-
-            # Unpack the rank R tensor into multiple rank R-1 tensors along axis
-            ymin, xmin, ymax, xmax = tf.unstack(anchors, axis=1)
-
-            # Return True for indices inside the image
-            xmin_index, ymin_index = tf.greater_equal(xmin, 0), tf.greater_equal(ymin, 0)
-            xmax_index, ymax_index = tf.less_equal(xmax, img_dim), tf.less_equal(ymax, img_dim)
-
-            # Now clean up the indices and return them
-            indices = tf.transpose(tf.stack([ymin_index, xmin_index, ymax_index, xmax_index]))
-            indices = tf.cast(indices, dtype=tf.int32)
-            indices = tf.reduce_sum(indices, axis=1)
-            indices = tf.where(tf.equal(indices, tf.shape(anchors)[1]))
-
-            return tf.reshape(indices, [-1, ])
+        pass
 
 
     """
@@ -3221,92 +3285,6 @@ class MRCNN(SODMatrix):
             iou = overlaps / (area_1 + area_2 - overlaps)
 
             return iou
-
-
-    def extract_box_labels(self, mask, dim_3d=False):
-
-        """
-        Returns the bounding box labels from each 2D segmentation mask. Can work with multiple label groupings (classes)
-        :param mask: Input mask in 2D [height, weight, channels] or 3D [slice, height, weight, channels]
-        :param dim_3d: bool, whether input is 3D or 2D
-        :return: np list of arrays of bounding box coordinates of the corners [N, (y1, x1, y2, x2)]
-        """
-
-        if dim_3d:
-
-            # Expand dims
-            if mask.ndim < 4: mask = np.expand_dims(mask, axis=-1)
-
-            # Make dummy array with diff boxes for each channel
-            boxes = np.zeros([mask.shape[0], mask.shape[-1], 4], dtype=np.int32)
-
-            for a in range (mask.shape[0]):
-
-                # Loop through all the classes (channels)
-                for z in range(mask[a].shape[-1]):
-
-                    # Work on just this class of pixel
-                    m = mask[a, :, :, z]
-
-                    # Bounding boxes generated by finding indices with true values
-                    x_indices = np.where(np.any(m, axis=0))[0]
-                    y_indices = np.where(np.any(m, axis=1))[0]
-
-                    if x_indices.shape[0]:
-
-                        x1, x2 = x_indices[[0, -1]]
-                        y1, y2 = y_indices[[0, -1]]
-
-                        # Increment x2 and y2 by 1 since theyre not part of the initial box
-                        x2 += 1
-                        y2 += 1
-
-                    else:
-
-                        # No mask for this instance, happens a lot. Sets boxes to zero
-                        x1, x2, y1, y2 = 0, 0, 0, 0
-
-                    # Append coordinates to boxes
-                    boxes[a, z] = np.array([y1, x1, y2, x2])
-
-            return boxes.astype(np.int32)
-
-        else:
-
-            # Expand dims
-            if mask.ndim < 3: mask = np.expand_dims(mask, axis=-1)
-
-            # Make dummy array with diff boxes for each channel
-            boxes = np.zeros([mask.shape[-1], 4], dtype=np.int32)
-
-            # Loop through all the classes (channels)
-            for z in range (mask.shape[-1]):
-
-                # Work on just this class of pixel
-                m = mask[:, :, z]
-
-                # Bounding boxes generated by finding indices with true values
-                x_indices = np.where(np.any(m, axis=0))[0]
-                y_indices = np.where(np.any(m, axis=1))[0]
-
-                if x_indices.shape[0]:
-
-                    x1, x2 = x_indices[[0, -1]]
-                    y1, y2 = y_indices[[0, -1]]
-
-                    # Increment x2 and y2 by 1 since theyre not part of the initial box
-                    x2 += 1
-                    y2 += 1
-
-                else:
-
-                    # No mask for this instance, happens a lot. Sets boxes to zero
-                    x1, x2, y1, y2 = 0, 0, 0, 0
-
-                # Append coordinates to boxes
-                boxes[z] = np.array([y1, x1, y2, x2])
-
-            return boxes.astype(np.int32)
 
 
     def calculate_overlaps_mask_box(self, mask, box):
@@ -3476,7 +3454,7 @@ class MRCNN(SODMatrix):
 
 
     """
-    Testing functions
+    Testing functions: TODO: Move to the SODtester class
     """
 
     def trim_zeros(self, x):
@@ -3648,10 +3626,10 @@ class MRCNN(SODMatrix):
 
 
     """
-    Utility Functions
+    Hidden Utility Functions
     """
 
-    def batch_slice(self, inputs, graph_fn, batch_size, names=None):
+    def _batch_slice(self, inputs, graph_fn, batch_size, names=None):
 
         """
         Splits inputs into slices and feeds each slice to a copy of the given computation graph and then combines the results.
@@ -3716,7 +3694,7 @@ class MRCNN(SODMatrix):
         return np.around(np.multiply(boxes, scale) + shift).astype(np.int32)
 
 
-    def enum_scales(self, base_anchor, anchor_scales, name='enum_scales'):
+    def _enum_scales(self, base_anchor, anchor_scales, name='enum_scales'):
 
         '''
         :param base_anchor: [y_center, x_center, h, w]
@@ -3730,7 +3708,7 @@ class MRCNN(SODMatrix):
             return anchor_scales
 
 
-    def enum_ratios(self, anchors, anchor_ratios, name='enum_ratios'):
+    def _enum_ratios(self, anchors, anchor_ratios, name='enum_ratios'):
 
         '''
         :param anchors: base anchors in different scales
@@ -3756,3 +3734,145 @@ class MRCNN(SODMatrix):
             num_anchors_per_location = tf.shape(ws)[0]
 
             return tf.transpose(tf.stack([tf.zeros([num_anchors_per_location, ]), tf.zeros([num_anchors_per_location, ]), ws, hs]))
+
+
+    def _encode(self, boxes, anchors, scale_factors=None):
+
+        """
+        Encode a box collection with respect to anchor collection.
+        AKA generate deltas to transform source offsets into destination anchors
+        :param boxes: BoxList holding N boxes to be encoded.
+        :param anchors: BoxList of anchors.
+        :param: scale_factors: scales location targets when using joint training
+        :return:
+          a tensor representing N anchor-encoded boxes of the format
+          [ty, tx, th, tw].
+        """
+
+        # Convert anchors to the center coordinate representation.
+        ymin, xmin, ymax, xmax = tf.unstack(boxes, axis=1)
+        ymia, xmia, ymaa, xmaa = tf.unstack(anchors, axis=1)
+        cenx = (xmin + xmax) / 2
+        cenxa = cenxa = (xmia + xmaa) / 2
+        ceny = (ymin + ymax) / 2
+        cenya = (ymia + ymaa) / 2
+        w = xmax - xmin
+        h = ymax - ymin
+        wa = xmaa - xmia
+        ha = ymaa - ymia
+
+        # Avoid NaN in division and log below.
+        ha += 1e-8
+        wa += 1e-8
+        h += 1e-8
+        w += 1e-8
+
+        # Calculate the normalized translations required
+        tx = (cenx - cenxa) / wa
+        ty = (ceny - cenya) / ha
+        tw = tf.log(w / wa)
+        th = tf.log(h / ha)
+
+        # Scales location targets as used in paper for joint training.
+        if scale_factors:
+            ty *= scale_factors[0]
+            tx *= scale_factors[1]
+            th *= scale_factors[2]
+            tw *= scale_factors[3]
+
+        return tf.transpose(tf.stack([ty, tx, th, tw]))
+
+
+    def _decode(self, rel_codes, anchors, scale_factors=None):
+
+        """Decode relative codes to boxes.
+        Args:
+          rel_codes: a tensor representing N anchor-encoded boxes.
+          anchors: BoxList of anchors.
+        Returns:
+          boxes: BoxList holding N bounding boxes.
+        """
+
+        # Convert anchors to the center coordinate representation.
+        ymia, xmia, ymaa, xmaa = tf.unstack(anchors, axis=1)
+        cenxa = cenxa = (xmia + xmaa) / 2
+        cenya = (ymia + ymaa) / 2
+        wa = xmaa - xmia
+        ha = ymaa - ymia
+
+        ty, tx, th, tw = tf.unstack(rel_codes, axis=1)
+
+        if scale_factors:
+            ty /= scale_factors[0]
+            tx /= scale_factors[1]
+            th /= scale_factors[2]
+            tw /= scale_factors[3]
+
+        w = tf.exp(tw) * wa
+        h = tf.exp(th) * ha
+        ycenter = ty * ha + cenya
+        xcenter = tx * wa + cenxa
+
+        ymin = ycenter - h / 2.
+        xmin = xcenter - w / 2.
+        ymax = ycenter + h / 2.
+        xmax = xcenter + w / 2.
+
+        return tf.transpose(tf.stack([ymin, xmin, ymax, xmax]))
+
+
+    # Overwrite the convolution function wrapper to include the reuse flag for our RPN to work on a FPN output. Remove downsample and dropout
+    def _convolution_RPN(self, scope, X, F, K, S=1, padding='SAME', phase_train=None, BN=True, relu=True, bias=True, reuse=None, summary=True):
+
+        """
+        This is a wrapper for convolutions
+        :param scope:
+        :param X: Output of the prior layer
+        :param F: Convolutional filter size
+        :param K: Number of feature maps
+        :param S: Stride
+        :param padding: 'SAME' or 'VALID'
+        :param phase_train: For batch norm implementation
+        :param BN: whether to perform batch normalization
+        :param relu: bool, whether to do the activation function at the end
+        :param bias: whether to include a bias term
+        :param reuse: wehther we will be reusing this layer
+        :param summary: whether to output a summary
+        :return:
+        """
+
+        # Set channel size based on input depth
+        C = X.get_shape().as_list()[-1]
+        B = X.get_shape().as_list()[0]
+
+        # Set the scope
+        with tf.variable_scope(scope, reuse=reuse) as scope:
+
+            # Set training phase variable
+            self.training_phase = phase_train
+
+            # Define the Kernel. Can use Xavier init: contrib.layers.xavier_initializer())
+            kernel = tf.get_variable('Weights', shape=[F, F, C, K], initializer=tf.contrib.layers.variance_scaling_initializer())
+
+            # Add to the weights collection
+            tf.add_to_collection('weights', kernel)
+
+            # Perform the actual convolution
+            conv = tf.nn.conv2d(X, kernel, [1, S, S, 1], padding=padding)
+
+            # Add in the bias
+            if bias:
+                bias = tf.get_variable('Bias', shape=[K], initializer=tf.constant_initializer(0.0))
+                tf.add_to_collection('biases', bias)
+                conv = tf.nn.bias_add(conv, bias)
+
+            # Relu activation
+            if relu: conv = tf.nn.relu(conv, name=scope.name)
+
+            # Apply the batch normalization. Updates weights during training phase only
+            if BN: conv = self.batch_normalization(conv, phase_train, scope)
+
+            # Create a histogram/scalar summary of the conv1 layer
+            if summary: self._activation_summary(conv)
+
+            return conv
