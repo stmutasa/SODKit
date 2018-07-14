@@ -13,3 +13,5 @@ SOD_ResNet contains a wrapper for setting up a residual style network in 2D, 2.5
 SOD_DenseNet contains a wrapper for setting up a Dense network in 2D, 2.5D or a Dense style Unet in 2D or 2.5D
 
 SOD_ObjectDetection contains wrappers for The popular object detection networks Faster-RCNN and MASK-RCNN
+
+SOD_Display contains wrappers for displaying data in various ways from 3D volumes, mosaics to histograms and bar plots.
