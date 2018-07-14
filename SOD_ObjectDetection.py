@@ -4,6 +4,7 @@ Faster-RCNN
 Mask-RCNN
 """
 
+
 from SODNetwork import tf
 from SODNetwork import np
 from SODNetwork import SODMatrix
@@ -21,8 +22,8 @@ class MRCNN(SODMatrix):
 
     def __init__(self, phase_train, GPU_count=1, Images_per_gpu=2, FCN=256, K1=32, Num_classes=1, FPN_layers=64,
                  RPN_anchor_scales=(1, 0.5), RPN_anchor_ratios=[0.5, 1, 2], Image_size=512, RPN_base_anchor_size=[6, 13, 20, 35],
-                 RPN_nms_upper_threshold=0.7, RPN_nms_lower_threshold=0.3, RPN_anchors_per_image=256,
-                 batch_size=8, max_proposals=32, RPN_batch_size=256, RPN_batch_positives_ratio=0.5,
+                 RPN_nms_upper_threshold=0.7, RPN_nms_lower_threshold=0.3, RPN_anchors_per_image=256, RPN_class_loss_weight=1.0,
+                 batch_size=8, max_proposals=32, RPN_batch_size=256, RPN_batch_positives_ratio=0.5, RPN_box_loss_weight=1.0,
                  POST_NMS_ROIS_training=2000, POST_NMS_ROIS_testing=1000, Use_mini_mask=False, Mini_mask_shape=[56, 56]):
 
         """
@@ -48,6 +49,8 @@ class MRCNN(SODMatrix):
         :param RPN_anchors_per_image: how many anchors per image to use for RPN training
         :param RPN_batch_size: The batch size of the region proposal network otuput
         :param RPN_batch_positives_ratio: The ratio of positives in the RPN output batch
+        :param RPN_class_loss_weight: Relative weighting of the RPN foreground loss
+        :param RPN_box_loss_weight: relative weighting of the RPN bounding box loss
 
         :param POST_NMS_ROIS_training: ROIs kept after non-maximum supression (training)
         :param POST_NMS_ROIS_testing: ROIs kept after non-maximum supression (inference)
@@ -79,6 +82,9 @@ class MRCNN(SODMatrix):
         self.RPN_base_anchor_size = RPN_base_anchor_size
         self.batch_size = batch_size
         self.max_proposals = max_proposals
+
+        self.RPN_class_loss_weight = RPN_class_loss_weight
+        self.RPN_box_loss_weight = RPN_box_loss_weight
 
         # Keeping track of the layers and losses
         # self.RPN_ROI = None
@@ -122,13 +128,12 @@ class MRCNN(SODMatrix):
             inception_layers[-1], inception_layers[-2] = 1, 1
 
             # Define the downsample network and retreive the output of each block #TODO: Fix class inheritence and FPN layers
-            if FPN:
-                _, self.conv = self.resnet.define_network(block_sizes, inception_layers, FPN=True, FPN_layers=self.FPN_layers)
-            else:
-                _, self.conv = self.resnet.define_network(block_sizes, inception_layers, FPN=False)
+            if FPN: _, self.conv = self.resnet.define_network(block_sizes, inception_layers, FPN=True, FPN_layers=self.FPN_layers)
+            else: _, self.conv = self.resnet.define_network(block_sizes, inception_layers, FPN=False)
 
         if net_type == 'DENSE':
             pass
+
 
     def RPN_Process(self):
 
@@ -141,6 +146,11 @@ class MRCNN(SODMatrix):
         # Run the forward pass and generate anchor boxes
         class_logits, box_logits = self._RPN_conv()
         anchors = self._make_anchors_FPN()
+
+        # Reshape the batched anchors to a single list:
+        # TODO: Note that this may make it difficult for us to limit the number of proposals per image in the batch. This biases to large PEs
+        class_logits, box_logits = tf.reshape(class_logits, [-1, 2]), tf.reshape(box_logits, [-1, 4])
+        anchors = tf.reshape(anchors, [-1, 4])
 
         # Under new name scope (not get_variable), clean up the anchors generated during training
         with tf.name_scope('RPNN_Forward'):
@@ -157,6 +167,7 @@ class MRCNN(SODMatrix):
             else:
                 self.anchors, self.RPN_class_logits, self.RPN_box_logits = anchors, class_logits, box_logits
 
+
     def RPN_Post_process(self, summary=None):
 
         """
@@ -166,9 +177,14 @@ class MRCNN(SODMatrix):
         """
 
         with tf.variable_scope('RPN_Losses'):
+
             # Run the post processing functions to retreive the gneerated minibatches from the RPN
             minibatch_indices, minibatch_anchor_matched_gtboxes, object_mask, minibatch_labels_one_hot = self._RPN_make_minibatch(self.anchors)
             negative_object_mask = tf.cast(tf.logical_not(tf.cast(object_mask, tf.bool)), tf.float32)
+
+            # TestingTODO:
+            self.t1, self.t2, self.t3 = minibatch_indices, minibatch_anchor_matched_gtboxes, object_mask
+            return
 
             # Gather the anchors and logits that made it into the generated minibatch
             minibatch_anchors = tf.gather(self.anchors, minibatch_indices)
@@ -190,16 +206,21 @@ class MRCNN(SODMatrix):
 
             # Now for the losses
             with tf.variable_scope('rpn_location_loss'):
+
                 # First calculate the smooth L1 location loss and save
                 location_loss = self._smooth_l1_loss(minibatch_box_logits, minibatch_encoded_gtboxes, object_mask)
+                location_loss *= self.RPN_box_loss_weight
                 tf.add_to_collection('losses', location_loss)
 
             # Now calculate softmax loss and save
             with tf.variable_scope('rpn_classifcation_loss'):
+
                 classification_loss = tf.nn.softmax_cross_entropy_with_logits_v2(labels=minibatch_labels_one_hot, logits=minibatch_class_logits)
+                classification_loss *= self.RPN_class_loss_weight
                 tf.add_to_collection('losses', classification_loss)
 
-            return location_loss, classification_loss
+            self.location_loss = location_loss
+            self.classification_loss = classification_loss
 
     """
     RPN hidden Inside functions
@@ -214,13 +235,16 @@ class MRCNN(SODMatrix):
 
         # Var scope creates a unique scope for all variables made including with tf.get_variable. name_scope allows reusing of variables
         with tf.variable_scope('make_anchors'):
+
             # List of anchors
             anchor_list, level_list = [], self.conv
 
             # Name scope doesn't rescope tf.get_variable calls
             with tf.name_scope('make_anchors_all_levels'):
+
                 # Loop through each FPN feature map scale
                 for FPN_scale, base_anchor_size in zip(self.conv, self.RPN_base_anchor_size):
+
                     # Stride = usually 1, return feature map size. Use index 2 in case of 3D feature maps
                     fm_size = tf.cast(tf.shape(FPN_scale)[2], tf.float32)
 
@@ -232,9 +256,12 @@ class MRCNN(SODMatrix):
 
                     # Reshape and append to the list
                     anchors = tf.reshape(anchors, [-1, 4])
-                    anchor_list.append(anchors)
 
-                all_level_anchors = tf.concat(anchor_list, axis=0)
+                    # Test: Copy the anchors along the batches here to mirror what we did with the convolutions
+                    batched_anchors = tf.stack([anchors]*self.batch_size, axis=0)
+                    anchor_list.append(batched_anchors)
+
+                all_level_anchors = tf.concat(anchor_list, axis=1)
 
             return all_level_anchors
 
@@ -252,6 +279,7 @@ class MRCNN(SODMatrix):
 
         # Define a variable scope
         with tf.variable_scope(name):
+
             # Generate a base anchor
             base_anchor = tf.constant([0, 0, base_anchor_size, base_anchor_size], tf.float32)
             base_anchors = self._enum_ratios(self._enum_scales(base_anchor, scales), ratios)
@@ -314,10 +342,8 @@ class MRCNN(SODMatrix):
         class_logits, box_logits = [], []
 
         # Calculate number of outputs for each head
-        try:
-            num_class_scores = 2 * len(self.RPN_anchor_scales) * len(self.RPN_anchor_ratios)
-        except:
-            num_class_scores = 2 * len(self.RPN_anchor_ratios)
+        try: num_class_scores = 2 * len(self.RPN_anchor_scales) * len(self.RPN_anchor_ratios)
+        except: num_class_scores = 2 * len(self.RPN_anchor_ratios)
         num_bbox_scores = 2 * num_class_scores
 
         # Loop through the FPN levels
@@ -327,19 +353,66 @@ class MRCNN(SODMatrix):
             scope_list = ['RPN_3x3', 'RPN_Classifier', 'RPN_Regressor']
 
             # Now run a 3x3 conv, then separate 1x1 convs for each feature map #TODO: Check if VALID, check BN/Relu
-            rpn_3x3 = self._convolution_RPN(scope_list[0], self.conv[lvl], 3, self.FPN_layers, phase_train=self.phase_train, reuse=reuse_flag, padding='VALID')
-            rpn_class = self._convolution_RPN(scope_list[1], rpn_3x3, 1, num_class_scores, BN=False, relu=False, bias=False, phase_train=self.phase_train, reuse=reuse_flag, padding='VALID')
-            rpn_box = self._convolution_RPN(scope_list[2], rpn_3x3, 1, num_bbox_scores, BN=False, relu=False, bias=False, phase_train=self.phase_train, reuse=reuse_flag, padding='VALID')
+            rpn_3x3 = self._convolution_RPN(scope_list[0], self.conv[lvl], 3, self.FPN_layers, phase_train=self.phase_train, reuse=reuse_flag)
+            rpn_class = self._convolution_RPN(scope_list[1], rpn_3x3, 1, num_class_scores, BN=False, relu=False, bias=False, phase_train=self.phase_train, reuse=reuse_flag)
+            rpn_box = self._convolution_RPN(scope_list[2], rpn_3x3, 1, num_bbox_scores, BN=False, relu=False, bias=False, phase_train=self.phase_train, reuse=reuse_flag)
 
-            # Reshape the scores and append to the list
-            rpn_class, rpn_box = tf.reshape(rpn_class, [-1, 2]), tf.reshape(rpn_box, [-1, 4])
+            # Reshape the scores and append to the list. Test: Reshaped with batch size
+            rpn_class, rpn_box = tf.reshape(rpn_class, [self.batch_size, -1, 2]), tf.reshape(rpn_box, [self.batch_size, -1, 4])
             class_logits.append(rpn_class)
             box_logits.append(rpn_box)
 
-        cll, bll = tf.concat(class_logits, axis=0), tf.concat(box_logits, axis=0)
+        # Test: Concat along axis 2
+        cll, bll = tf.concat(class_logits, axis=1), tf.concat(box_logits, axis=1)
 
         # Return the concatenated list
         return cll, bll
+
+    def _RPN_make_minibatch(self, valid_anchors):
+
+        """
+        Takes the valid anchors and generates a minibatch for the RPN with a certain amount of positives and negatives
+        :param valid_anchors:
+        :return:
+        """
+
+        with tf.variable_scope('rpn_minibatch'):
+            # TODO Make sure we only include x number from each example in the minibatch
+
+            # Label shape is [N,: ] where 1/2 is positive, 0 is negative and -1 is ignored.
+            labels, anchors_matched_gtboxes, object_mask = self._process_proposals(valid_anchors)
+
+            # Test
+            self.t1, self.t2, self.t3 =  labels, anchors_matched_gtboxes, object_mask
+            return labels, anchors_matched_gtboxes, object_mask, object_mask
+
+            # Positive indices are labels >= 1.0, reshape to vector
+            positive_indices = tf.reshape(tf.where(tf.greater_equal(labels, 1.0)), [-1])
+
+            # Calculate the number of positives to include. Use them all unless there are too many
+            num_positives = tf.minimum(tf.shape(positive_indices)[0], tf.cast(self.RPN_batch_positives_ratio * self.RPN_batch_size, tf.int32))
+
+            # Retreive a random selection of the positives and negatives
+            positive_indices, negative_indices = tf.random_shuffle(positive_indices), tf.reshape(tf.where(tf.equal(labels, 0.0)), [-1])
+            positive_indices = tf.slice(positive_indices, begin=[0], size=[num_positives])
+            num_negatives = tf.minimum(self.RPN_batch_size - num_positives, tf.shape(negative_indices)[0])
+            negative_indices = tf.slice(tf.random_shuffle(negative_indices), begin=[0], size=num_negatives)
+
+            # Join together to create the minibatch indices and randomize
+            minibatch_indices = tf.concat([positive_indices, negative_indices], axis=0)
+            minibatch_indices = tf.random_shuffle(minibatch_indices)
+
+            # Retreive the ground truth boxes for the indices in the generated minibatch
+            minibatch_anchor_matched_gtboxes = tf.gather(anchors_matched_gtboxes, minibatch_indices)
+
+            # Regenerate the labels and object mask for the indices that actually made it to the minibatch
+            object_mask = tf.gather(object_mask, minibatch_indices)
+            labels = tf.cast(tf.gather(labels, minibatch_indices), tf.int32)
+
+            # Make labels one hot
+            labels_one_hot = tf.one_hot(labels, depth=2)
+
+            return minibatch_indices, minibatch_anchor_matched_gtboxes, object_mask, labels_one_hot
 
     def _process_proposals(self, anchors):
 
@@ -351,13 +424,40 @@ class MRCNN(SODMatrix):
         """
 
         # Set the variable scope
-        with tf.variable_scope('Postprocess_RPN'):
-            # Saved GT boxes as boxes and the FOREGROUND label as last row. (gt_boxes was saved as 5 columns with last as class, not foreground/bkgrnd)
-            gtboxes = tf.reshape(self.gt_boxes[:, :, :-1], [-1, 4])
-            labels = tf.ones(shape=[tf.shape(anchors)[0], ], dtype=tf.float32) * (-1)  # ignored is -1
+        with tf.variable_scope('Process_proposals'):
 
-            # Calculate iou. GT boxes are saved as [y1, x1, y2, x2], anchor boxes are saved as the same [hopefully] : Tf default
-            iou = self.iou_calculate(anchors, gtboxes)
+            # At this point, there is one or two GT box per image. and all the anchors are exactly the same for each image
+            ious, column = [], 0
+
+            # Calculate the iou for each anchor and gt box gtboxes shape=(8, 1, 5), anchors shape=(186k, 4)
+            num_gt_boxes = tf.shape(self.gt_boxes)[0] * tf.shape(self.gt_boxes)[1]
+            for z in range (self.batch_size):
+
+                # Use only this batches gt_boxes and anchors
+                batch_gtbox = tf.cast(tf.reshape(self.gt_boxes[z, :, :-1], [-1, 4]), tf.float32)
+                batch_anchors = tf.reshape(anchors, [self.batch_size, -1, 4])
+
+                # Retreive number of gtboxes for this image and number of anchors
+                num_gt = tf.shape(batch_gtbox)[0]
+                num_anchors = tf.shape(batch_anchors)[0]
+
+                # Calculate ious and append to the correct portion of the iou array
+                batch_iou = self._iou_calculate(batch_anchors[z], batch_gtbox)
+
+                # Pad the ious with zeros along the y axis
+                paddings = tf.Variable([[0, 0], [column, (num_gt_boxes - (column + num_gt))]])
+                batch_iou = tf.pad(batch_iou, paddings)
+                ious.append(batch_iou)
+
+                # Move column start point for next iteration
+                column += num_gt
+
+            # Combine anchors. TODO: This will give problems if there are multiple gtboxes in one image
+            iou = tf.concat(ious, axis=0)
+
+            # Saved GT boxes as boxes and the FOREGROUND label as last row. (gt_boxes was saved as 5 columns with last as class, not foreground/bkgrnd)
+            gtboxes = tf.cast(tf.reshape(self.gt_boxes[:, :, :-1], [-1, 4]), tf.float32)
+            labels = tf.ones(shape=[tf.shape(anchors)[0], ], dtype=tf.float32) * (-1)  # Make all ignored for now
 
             # Retreive the max iou for each anchor (row) and max iou for each gtbox (column)
             max_iou_each_row = tf.reduce_max(iou, axis=1)
@@ -401,53 +501,11 @@ class MRCNN(SODMatrix):
             # TODO: Glitch returning the same boxes
             return labels, anchors_matched_gtboxes, object_mask
 
-    def _RPN_make_minibatch(self, valid_anchors):
-
-        """
-        Takes the valid anchors and generates a minibatch for the RPN with a certain amount of positives and negatives
-        :param valid_anchors:
-        :return:
-        """
-
-        with tf.variable_scope('rpn_minibatch'):
-            # TODO Make sure we only include x number from each example in the minibatch
-
-            # Label shape is [N,: ] where 1/2 is positive, 0 is negative and -1 is ignored.
-            labels, anchors_matched_gtboxes, object_mask = self._process_proposals(valid_anchors)
-
-            # Positive indices are labels >= 1.0, reshape to vector
-            positive_indices = tf.reshape(tf.where(tf.greater_equal(labels, 1.0)), [-1])
-
-            # Calculate the number of positives to include. Use them all unless there are too many
-            num_positives = tf.minimum(tf.shape(positive_indices)[0], tf.cast(self.RPN_batch_positives_ratio * self.RPN_batch_size, tf.int32))
-
-            # Retreive a random selection of the positives and negatives
-            positive_indices, negative_indices = tf.random_shuffle(positive_indices), tf.reshape(tf.where(tf.equal(labels, 0.0)), [-1])
-            positive_indices = tf.slice(positive_indices, begin=[0], size=[num_positives])
-            num_negatives = tf.minimum(self.RPN_batch_size - num_positives, tf.shape(negative_indices)[0])
-            negative_indices = tf.slice(tf.random_shuffle(negative_indices), begin=[0], size=num_negatives)
-
-            # Join together to create the minibatch indices and randomize
-            minibatch_indices = tf.concat([positive_indices, negative_indices], axis=0)
-            minibatch_indices = tf.random_shuffle(minibatch_indices)
-
-            # Retreive the ground truth boxes for the indices in the generated minibatch
-            minibatch_anchor_matched_gtboxes = tf.gather(anchors_matched_gtboxes, minibatch_indices)
-
-            # Regenerate the labels and object mask for the indices that actually made it to the minibatch
-            object_mask = tf.gather(object_mask, minibatch_indices)
-            labels = tf.cast(tf.gather(labels, minibatch_indices), tf.int32)
-
-            # Make labels one hot
-            labels_one_hot = tf.one_hot(labels, depth=2)
-
-            return minibatch_indices, minibatch_anchor_matched_gtboxes, object_mask, labels_one_hot
-
     """
     Loss functions
     """
 
-    def _smooth_l1_loss(self, predicted_boxes, gtboxes, object_weights):
+    def _smooth_l1_loss(self, predicted_boxes, gtboxes, object_weights, classes_weights=None):
 
         """
         TODO: Calculates the smooth L1 losses
@@ -456,13 +514,28 @@ class MRCNN(SODMatrix):
         :param object_weights:
         :return:
         """
-        pass
+
+        diff = predicted_boxes - gtboxes
+        absolute_diff = tf.cast(tf.abs(diff), tf.float32)
+
+        if classes_weights is None:
+
+            anchorwise_smooth_l1norm = tf.reduce_sum(tf.where(tf.less(absolute_diff, 1),
+                                    0.5 * tf.square(absolute_diff), absolute_diff - 0.5), axis=1) * object_weights
+
+        else:
+
+            anchorwise_smooth_l1norm = tf.reduce_sum(tf.where(tf.less(absolute_diff, 1),
+                                        0.5 * tf.square(absolute_diff)*classes_weights, (absolute_diff - 0.5)*classes_weights), axis=1) * object_weights
+
+        return tf.reduce_mean(anchorwise_smooth_l1norm, axis=0)
+
 
     """
     Bounding box functions
     """
 
-    def iou_calculate(self, boxes1, boxes2):
+    def _iou_calculate(self, boxes1, boxes2):
 
         """
         Calculates the IOU of two boxes
@@ -473,6 +546,7 @@ class MRCNN(SODMatrix):
 
         # Just a name scope this time
         with tf.name_scope('iou_calculate'):
+
             # Split the coordinates
             ymin_1, xmin_1, ymax_1, xmax_1 = tf.split(boxes1, 4, axis=1)  # ymin_1 shape is [N, 1]..
             ymin_2, xmin_2, ymax_2, xmax_2 = tf.unstack(boxes2, axis=1)  # ymin_2 shape is [M, ]..
@@ -576,84 +650,6 @@ class MRCNN(SODMatrix):
             indices = np.delete(indices, 0)
 
         return np.array(picks, dtype=np.int32)
-
-    def generate_deltas(self, anchors, offsets):
-
-        """
-        Function that generates the deltas from the RPN
-        :param anchors:
-        :param offsets:
-        :return:
-        """
-
-        deltas = np.zeros(offsets.shape)
-        idx = np.sum(np.abs(anchors), axis=1) > 0
-        idx = np.nonzero(idx)[0]
-
-        for z in idx:
-            # Retreive the source and target coordinates
-            y, x, h, w = offsets[z]
-            y1, x1, y2, x2 = anchors[z]
-
-            # Retreive center point and mean transform
-            ya, xa = np.mean((y1, y2)), np.mean((x1, x2))
-            h2, w2 = (y2 - y1), (x2 - x1)
-
-            # Generate the delta array. Avoid numerical errors
-            deltas[z] = [(ya - y) / h, (xa - x) / w, np.log(h2 / (h + 1e-6)), np.log(w2 / (w + 1e-6))]
-
-            return deltas.astype('float32')
-
-    def calculate_box_deltas(self, box, label_box):
-
-        """
-        Calculates the refinement needed to transform predicted box to the label (ground truth) box
-        :param box: [N, (y1, x1, y2, x2)]
-        :param label_box: [N, (y1, x1, y2, x2)]
-        :return:
-        """
-
-        # Convert to float32
-        box, label_box = tf.cast(box, tf.float32), tf.cast(label_box, tf.float32)
-
-        # Convert to y, x, h, w
-        h, w = (box[:, 2] - box[:, 0]), (box[:, 3] - box[:, 1])
-        center_y, center_x = (h * 0.5 + box[:, 0]), (w * 0.5 + box[:, 1])
-        lbl_h, lbl_w = (label_box[:, 2] - label_box[:, 0]), (label_box[:, 3] - label_box[:, 1])
-        lbl_center_y, lbl_center_x = (lbl_h * 0.5 + label_box[:, 0]), (lbl_w * 0.5 + label_box[:, 1])
-
-        # Now calculate the normalized shifts
-        dy = (lbl_center_y - center_y) / h
-        dx = (lbl_center_x - center_x) / w
-        dh, dw = tf.log(lbl_h / h), tf.log(lbl_w / w)
-
-        return tf.stack([dy, dx, dh, dw], axis=1)
-
-    def apply_deltas(self, boxes, deltas):
-
-        """
-        Applies the deltas given to the boxes given
-        :param boxes: [N, (y1, x1, y2, x2)]
-        :param deltas: [N, (dy, dx, log(dh), log(dw)]
-        :return:
-        """
-
-        # Fix data type
-        boxes = boxes.astype(np.float32)
-
-        # Convert to y, x, h, w
-        h, w = (boxes[:, 2] - boxes[:, 0]), (boxes[:, 3] - boxes[:, 1])
-        center_y, center_x = (h * 0.5 + boxes[:, 0]), (w * 0.5 + boxes[:, 1])
-
-        # Apply deltas
-        center_y += deltas[:, 0] * h
-        center_x += deltas[:, 1] * w
-
-        # Convert back to y1, x1, y2, x2
-        y1, x1 = (center_y - 0.5 * h), (center_x - 0.5 * w)
-        y2, x2 = (y1 + h), (x1 + w)
-
-        return np.stack([y1, x1, y2, x2], axis=1)
 
     """
     Testing functions: TODO: Move to the SODtester class
@@ -825,68 +821,6 @@ class MRCNN(SODMatrix):
     """
     Hidden Utility Functions
     """
-
-    def _batch_slice(self, inputs, graph_fn, batch_size, names=None):
-
-        """
-        Splits inputs into slices and feeds each slice to a copy of the given computation graph and then combines the results.
-        It allows you to run a graph on a batch of inputs even if the graph is written to support one instance only.
-        :param inputs: List of tensors with same first dimension length
-        :param graph_fn: function that returns a TF tensor thats part of a graph
-        :param batch_size: Number of slices to divide the data into
-        :param names: Assigns names to the resulting tensors if provided
-        :return:
-        """
-
-        # Change the inputs to a list
-        if not isinstance(inputs, list): inputs = [inputs]
-
-        outputs = []
-        for i in range(batch_size):
-            inputs_slice = [x[i] for x in inputs]
-            output_slice = graph_fn(*inputs_slice)
-            if not isinstance(output_slice, (tuple, list)): output_slice = [output_slice]
-            outputs.append(output_slice)
-
-        # Change outputs from a list of slices where each is a list of outputs to a list of outputs and each has a list of slices
-        outputs = list(zip(*outputs))
-
-        if names is None: names = [None] * len(outputs)
-
-        result = [tf.stack(o, axis=0, name=n) for o, n in zip(outputs, names)]
-        if len(result) == 1: result = result[0]
-
-        return result
-
-    def norm_boxes(self, boxes, shape):
-
-        """
-        Normalizes the pixel coordinates of boxes
-        :param boxes: [N, (y1, x1, y2, x2)] in pixel coordinates
-        :param shape: [..., (height, width)] in pixels
-                Note: In pixel coordinates (y2, x2) is outside the box. But in normalized coordinates it's inside the box.
-        :return: [N, (y1, x1, y2, x2)] in normalized coordinates
-        """
-
-        h, w = shape
-        scale = np.array([h - 1, w - 1, h - 1, w - 1])
-        shift = np.array([0, 0, 1, 1])
-        return np.divide((boxes - shift), scale).astype(np.float32)
-
-    def denorm_boxes(self, boxes, shape):
-
-        """
-        Converts boxes from normalized coordinates to pixel coordinates.
-        :param boxes: [N, (y1, x1, y2, x2)] in pixel coordinates
-        :param shape: [..., (height, width)] in pixels
-                Note: In pixel coordinates (y2, x2) is outside the box. But in normalized coordinates it's inside the box.
-        :return: [N, (y1, x1, y2, x2)] in pixel coordinates
-        """
-
-        h, w = shape
-        scale = np.array([h - 1, w - 1, h - 1, w - 1])
-        shift = np.array([0, 0, 1, 1])
-        return np.around(np.multiply(boxes, scale) + shift).astype(np.int32)
 
     def _enum_scales(self, base_anchor, anchor_scales, name='enum_scales'):
 
