@@ -143,14 +143,18 @@ class MRCNN(SODMatrix):
         :return:
         """
 
-        # Run the forward pass and generate anchor boxes
+        # Run the forward pass and generate anchor boxes: These return as [batch, n, x] with n = # of anchors
         class_logits, box_logits = self._RPN_conv()
         anchors = self._make_anchors_FPN()
 
+        # Also keep a list of which image each anchor came from. Use array broadcasting
+        batch_img = tf.cast(tf.lin_space(0.0, tf.cast(self.batch_size-1, tf.float32), self.batch_size), tf.int16)
+        anchor_img_source = tf.transpose(tf.multiply(batch_img, tf.transpose(tf.ones_like(anchors[:, :, -1:], tf.int16))))
+
         # Reshape the batched anchors to a single list:
-        # TODO: Note that this may make it difficult for us to limit the number of proposals per image in the batch. This biases to large PEs
         class_logits, box_logits = tf.reshape(class_logits, [-1, 2]), tf.reshape(box_logits, [-1, 4])
         anchors = tf.reshape(anchors, [-1, 4])
+        self.anchor_img_source = tf.reshape(anchor_img_source, [-1, 1])
 
         # Under new name scope (not get_variable), clean up the anchors generated during training
         with tf.name_scope('RPNN_Forward'):
@@ -171,7 +175,8 @@ class MRCNN(SODMatrix):
     def RPN_Post_process(self, summary=None):
 
         """
-        Calculates the RPN losses after processing the proposals and making a minibatch
+        This function first creates a minibatch by attempting to combine equal positive and negative box proposals
+        Then it calculates the losses for the minibatch box dimensions and classifications of background/foreground
         :param summary: Whether to print a summary image to tensorboard
         :return:
         """
@@ -182,18 +187,15 @@ class MRCNN(SODMatrix):
             minibatch_indices, minibatch_anchor_matched_gtboxes, object_mask, minibatch_labels_one_hot = self._RPN_make_minibatch(self.anchors)
             negative_object_mask = tf.cast(tf.logical_not(tf.cast(object_mask, tf.bool)), tf.float32)
 
-            # TestingTODO:
-            self.t1, self.t2, self.t3 = minibatch_indices, minibatch_anchor_matched_gtboxes, object_mask
-            return
-
             # Gather the anchors and logits that made it into the generated minibatch
+            self.minibatch_image_source = tf.gather(self.anchor_img_source, minibatch_indices)
             minibatch_anchors = tf.gather(self.anchors, minibatch_indices)
             minibatch_class_logits = tf.gather(self.RPN_class_logits, minibatch_indices)
             minibatch_box_logits = tf.gather(self.RPN_box_logits, minibatch_indices)
 
             # Calculate deltas required to transform anchors to gtboxes, aka the loss
             minibatch_encoded_gtboxes = self._encode(minibatch_anchor_matched_gtboxes, minibatch_anchors)
-            minibatch_decoded_boxes = self._decode(minibatch_encoded_gtboxes, minibatch_anchors)
+            minibatch_decoded_boxes = self._decode(minibatch_encoded_gtboxes, minibatch_anchors) # For the image summary
 
             # TODO: if we want to generate a summary image
             if summary:
@@ -207,7 +209,7 @@ class MRCNN(SODMatrix):
             # Now for the losses
             with tf.variable_scope('rpn_location_loss'):
 
-                # First calculate the smooth L1 location loss and save
+                # First calculate the smooth L1 location loss and save to the loss collection
                 location_loss = self._smooth_l1_loss(minibatch_box_logits, minibatch_encoded_gtboxes, object_mask)
                 location_loss *= self.RPN_box_loss_weight
                 tf.add_to_collection('losses', location_loss)
@@ -216,6 +218,7 @@ class MRCNN(SODMatrix):
             with tf.variable_scope('rpn_classifcation_loss'):
 
                 classification_loss = tf.nn.softmax_cross_entropy_with_logits_v2(labels=minibatch_labels_one_hot, logits=minibatch_class_logits)
+                classification_loss = tf.reduce_mean(classification_loss)
                 classification_loss *= self.RPN_class_loss_weight
                 tf.add_to_collection('losses', classification_loss)
 
@@ -225,6 +228,47 @@ class MRCNN(SODMatrix):
     """
     RPN hidden Inside functions
     """
+
+    def _RPN_conv(self):
+
+        """
+        TODO: Defines the region proposal network
+        :return:
+                ROI: Regions of interest
+                RPN_Loss_Object: The loss regaarding whether an object was found
+                RPN_Loss_Box: The loss regarding the bounding box
+        """
+
+        # Create arrays to hold the output logits for each level
+        class_logits, box_logits = [], []
+
+        # Calculate number of outputs for each head
+        try: num_class_scores = 2 * len(self.RPN_anchor_scales) * len(self.RPN_anchor_ratios)
+        except: num_class_scores = 2 * len(self.RPN_anchor_ratios)
+        num_bbox_scores = 2 * num_class_scores
+
+        # Loop through the FPN levels
+        for lvl in range(len(self.conv)):
+
+            # To share the head, we need reuse flag and a scope list
+            reuse_flag = None if lvl == 0 else True
+            scope_list = ['RPN_3x3', 'RPN_Classifier', 'RPN_Regressor']
+
+            # Now run a 3x3 conv, then separate 1x1 convs for each feature map #TODO: Check if VALID, check BN/Relu
+            rpn_3x3 = self._convolution_RPN(scope_list[0], self.conv[lvl], 3, self.FPN_layers, phase_train=self.phase_train, reuse=reuse_flag)
+            rpn_class = self._convolution_RPN(scope_list[1], rpn_3x3, 1, num_class_scores, BN=False, relu=False, bias=False, phase_train=self.phase_train, reuse=reuse_flag)
+            rpn_box = self._convolution_RPN(scope_list[2], rpn_3x3, 1, num_bbox_scores, BN=False, relu=False, bias=False, phase_train=self.phase_train, reuse=reuse_flag)
+
+            # Reshape the scores and append to the list. Test: Reshaped with batch size
+            rpn_class, rpn_box = tf.reshape(rpn_class, [self.batch_size, -1, 2]), tf.reshape(rpn_box, [self.batch_size, -1, 4])
+            class_logits.append(rpn_class)
+            box_logits.append(rpn_box)
+
+        # Test: Concat along axis 2
+        cll, bll = tf.concat(class_logits, axis=1), tf.concat(box_logits, axis=1)
+
+        # Return the concatenated list
+        return cll, bll
 
     def _make_anchors_FPN(self):
 
@@ -237,7 +281,7 @@ class MRCNN(SODMatrix):
         with tf.variable_scope('make_anchors'):
 
             # List of anchors
-            anchor_list, level_list = [], self.conv
+            anchor_list = []
 
             # Name scope doesn't rescope tf.get_variable calls
             with tf.name_scope('make_anchors_all_levels'):
@@ -257,7 +301,7 @@ class MRCNN(SODMatrix):
                     # Reshape and append to the list
                     anchors = tf.reshape(anchors, [-1, 4])
 
-                    # Test: Copy the anchors along the batches here to mirror what we did with the convolutions
+                    # Copy the anchors along the batches here to mirror what we did with the convolutions
                     batched_anchors = tf.stack([anchors]*self.batch_size, axis=0)
                     anchor_list.append(batched_anchors)
 
@@ -328,46 +372,6 @@ class MRCNN(SODMatrix):
 
             return tf.reshape(indices, [-1, ])
 
-    def _RPN_conv(self):
-
-        """
-        TODO: Defines the region proposal network
-        :return:
-                ROI: Regions of interest
-                RPN_Loss_Object: The loss regaarding whether an object was found
-                RPN_Loss_Box: The loss regarding the bounding box
-        """
-
-        # Create arrays to hold the output logits for each level
-        class_logits, box_logits = [], []
-
-        # Calculate number of outputs for each head
-        try: num_class_scores = 2 * len(self.RPN_anchor_scales) * len(self.RPN_anchor_ratios)
-        except: num_class_scores = 2 * len(self.RPN_anchor_ratios)
-        num_bbox_scores = 2 * num_class_scores
-
-        # Loop through the FPN levels
-        for lvl in range(len(self.conv)):
-            # To share the head, we need reuse flag and a scope list
-            reuse_flag = None if lvl == 0 else True
-            scope_list = ['RPN_3x3', 'RPN_Classifier', 'RPN_Regressor']
-
-            # Now run a 3x3 conv, then separate 1x1 convs for each feature map #TODO: Check if VALID, check BN/Relu
-            rpn_3x3 = self._convolution_RPN(scope_list[0], self.conv[lvl], 3, self.FPN_layers, phase_train=self.phase_train, reuse=reuse_flag)
-            rpn_class = self._convolution_RPN(scope_list[1], rpn_3x3, 1, num_class_scores, BN=False, relu=False, bias=False, phase_train=self.phase_train, reuse=reuse_flag)
-            rpn_box = self._convolution_RPN(scope_list[2], rpn_3x3, 1, num_bbox_scores, BN=False, relu=False, bias=False, phase_train=self.phase_train, reuse=reuse_flag)
-
-            # Reshape the scores and append to the list. Test: Reshaped with batch size
-            rpn_class, rpn_box = tf.reshape(rpn_class, [self.batch_size, -1, 2]), tf.reshape(rpn_box, [self.batch_size, -1, 4])
-            class_logits.append(rpn_class)
-            box_logits.append(rpn_box)
-
-        # Test: Concat along axis 2
-        cll, bll = tf.concat(class_logits, axis=1), tf.concat(box_logits, axis=1)
-
-        # Return the concatenated list
-        return cll, bll
-
     def _RPN_make_minibatch(self, valid_anchors):
 
         """
@@ -377,30 +381,75 @@ class MRCNN(SODMatrix):
         """
 
         with tf.variable_scope('rpn_minibatch'):
-            # TODO Make sure we only include x number from each example in the minibatch
 
-            # Label shape is [N,: ] where 1/2 is positive, 0 is negative and -1 is ignored.
+            # Label shape is [N,: ] where 1 is positive, 0 is negative and -1 is ignored.
+            # amgtb is [n, 4] where every anchor index is matched with the corresponding highest iou anchor
             labels, anchors_matched_gtboxes, object_mask = self._process_proposals(valid_anchors)
 
-            # Test
-            self.t1, self.t2, self.t3 =  labels, anchors_matched_gtboxes, object_mask
-            return labels, anchors_matched_gtboxes, object_mask, object_mask
+            # Positive indices are labels = 1.0. Return a reduced size array with these indices as entries
+            positive_indices = tf.reshape(tf.where(tf.equal(labels, 1.0)), [-1])
+            negative_indices = tf.reshape(tf.where(tf.equal(labels, 0.0)), [-1])
 
-            # Positive indices are labels >= 1.0, reshape to vector
-            positive_indices = tf.reshape(tf.where(tf.greater_equal(labels, 1.0)), [-1])
-
-            # Calculate the number of positives to include. Use them all unless there are too many
+            # Calculate the number of to include (scalar)
             num_positives = tf.minimum(tf.shape(positive_indices)[0], tf.cast(self.RPN_batch_positives_ratio * self.RPN_batch_size, tf.int32))
+            num_negatives = tf.minimum(self.RPN_batch_size - num_positives, tf.shape(negative_indices)[0])
 
             # Retreive a random selection of the positives and negatives
-            positive_indices, negative_indices = tf.random_shuffle(positive_indices), tf.reshape(tf.where(tf.equal(labels, 0.0)), [-1])
-            positive_indices = tf.slice(positive_indices, begin=[0], size=[num_positives])
-            num_negatives = tf.minimum(self.RPN_batch_size - num_positives, tf.shape(negative_indices)[0])
-            negative_indices = tf.slice(tf.random_shuffle(negative_indices), begin=[0], size=num_negatives)
+            positive_indices = tf.slice(tf.random_shuffle(positive_indices), begin=[0], size=[num_positives])
+            negative_indices = tf.slice(tf.random_shuffle(negative_indices), begin=[0], size=[num_negatives])
 
             # Join together to create the minibatch indices and randomize
             minibatch_indices = tf.concat([positive_indices, negative_indices], axis=0)
             minibatch_indices = tf.random_shuffle(minibatch_indices)
+
+            # Retreive the ground truth boxes for the indices in the generated minibatch
+            minibatch_anchor_matched_gtboxes = tf.gather(anchors_matched_gtboxes, minibatch_indices)
+
+            # Regenerate the labels and object mask for the indices that actually made it to the minibatch
+            object_mask = tf.gather(object_mask, minibatch_indices)
+            labels = tf.cast(tf.gather(labels, minibatch_indices), tf.int32)
+
+            # Make labels one hot
+            labels_one_hot = tf.one_hot(labels, depth=2)
+
+            return minibatch_indices, minibatch_anchor_matched_gtboxes, object_mask, labels_one_hot
+
+    def _RPN_make_minibatch_equalized_prototype(self, valid_anchors):
+
+        """
+        Takes the valid anchors and generates a minibatch for the RPN with a certain amount of positives and negatives
+        This version makes sure that each image contributes the same amount to the minibatch
+        :param valid_anchors: The anchors actually within the image
+        :return:
+        """
+
+        with tf.variable_scope('rpn_minibatch'):
+
+            # Label shape is [N,: ] where 1 is positive, 0 is negative and -1 is ignored.
+            # amgtb is [n, 4] where every anchor index is matched with the corresponding highest iou anchor
+            labels, anchors_matched_gtboxes, object_mask = self._process_proposals(valid_anchors)
+
+            # Reshape to batch sizes
+            labels = tf.reshape(labels, [self.batch_size, -1])
+
+            # This approach won't work because the indices are on a per batch basis once you reshape "labels". i.e. you will have duplicate indices
+            for b in range(self.batch_size):
+
+                # Positive indices are labels = 1.0. Return a reduced size array with these indices as entries
+                positive_indices = tf.reshape(tf.where(tf.equal(labels[b], 1.0)), [-1])
+                negative_indices = tf.reshape(tf.where(tf.equal(labels[b], 0.0)), [-1])
+
+                # Calculate the number of to include (scalar)
+                num_positives = tf.minimum(tf.shape(positive_indices)[0], tf.cast(self.RPN_batch_positives_ratio * self.RPN_batch_size // self.batch_size, tf.int32))
+                num_negatives = tf.minimum(self.RPN_batch_size//self.batch_size - num_positives, tf.shape(negative_indices)[0])
+
+                # Retreive a random selection of the positives and negatives
+                positive_indices = tf.slice(tf.random_shuffle(positive_indices), begin=[0], size=[num_positives])
+                negative_indices = tf.slice(tf.random_shuffle(negative_indices), begin=[0], size=[num_negatives])
+
+                # Join together to create the minibatch indices and randomize
+                minibatch_indices = tf.concat([positive_indices, negative_indices], axis=0)
+                minibatch_indices = tf.random_shuffle(minibatch_indices)
 
             # Retreive the ground truth boxes for the indices in the generated minibatch
             minibatch_anchor_matched_gtboxes = tf.gather(anchors_matched_gtboxes, minibatch_indices)
@@ -452,7 +501,7 @@ class MRCNN(SODMatrix):
                 # Move column start point for next iteration
                 column += num_gt
 
-            # Combine anchors. TODO: This will give problems if there are multiple gtboxes in one image
+            # Combine anchors.
             iou = tf.concat(ious, axis=0)
 
             # Saved GT boxes as boxes and the FOREGROUND label as last row. (gt_boxes was saved as 5 columns with last as class, not foreground/bkgrnd)
@@ -463,33 +512,34 @@ class MRCNN(SODMatrix):
             max_iou_each_row = tf.reduce_max(iou, axis=1)
             max_iou_each_column = tf.reduce_max(iou, axis=0)
 
-            # Retreive matches
-            matches = tf.cast(tf.argmax(iou, axis=1), tf.int32)
-
-            # Retreives positives1 and 2 for anchor with iou > 0.7 (default) and anchors with highest IoUs respectively
+            # Retreives indices: positives1 and 2 for anchor with iou > 0.7 (default) and anchors with highest IoUs respectively
             positives1 = tf.greater_equal(max_iou_each_row, self.RPN_nms_upper_threshold)  # Any iou index > threshold is True
-            positives2 = tf.reduce_sum(tf.cast(tf.equal(iou, max_iou_each_column), tf.float32), axis=1)
-            positives = tf.logical_or(positives1, tf.cast(positives2, tf.bool))
+            positives2 = tf.reduce_sum(tf.cast(tf.equal(iou, max_iou_each_column), tf.float32), axis=1) # Index for any anchor with iou == maxiou
+            positives = tf.logical_or(positives1, tf.cast(positives2, tf.bool)) # All anchors that fit the above two conditions            
 
             # Update labels with positive indices. Pos = 1, ignored and bkgrnd = -1
             labels += 2 * tf.cast(positives, tf.float32)
 
-            # Retreive the matched anchors after removing the background and ignored
-            matches = matches * tf.cast(positives, dtype=matches.dtype)  # Optional??
-            anchors_matched_gtboxes = tf.gather(gtboxes, matches)
+            # We want to retreive the index of the positive matches (positives is a binary matrix right now)
+            matches = tf.cast(tf.argmax(iou, axis=1), tf.int32)     # For each anchor, what column holds the highest iou
+            matches = matches * tf.cast(positives, dtype=matches.dtype)  # For each anchor we deem positive, what column holds the highest IOU
+            anchors_matched_gtboxes = tf.gather(gtboxes, matches) # For every anchor, return the GT box it matches up with best
+
+            # Anchors matched_gt_boxes is currently returning the GT box of each index. Works fine except for index 0 of which for background should be just 0,
+            # Later on the object mask will ignore these anyway
 
             # Retreive the negatives with iou < 0.3 (default)
             negatives = tf.less(max_iou_each_row, self.RPN_nms_lower_threshold)
             negatives = tf.logical_and(negatives, tf.greater_equal(max_iou_each_row, 0.1))
 
             # Update the labels with the negatives: +ive = 1, -ive = 0, ignored = -1
-            labels = labels + tf.cast(negatives, tf.float32)
-            positives = tf.cast(tf.greater_equal(labels, 1.0), tf.float32)
-            ignored = tf.cast(tf.equal(labels, -1.0), tf.float32) * (-1)
-            labels = positives + ignored
+            labels += tf.cast(negatives, tf.float32) # +ive = 1, -ive = 0, ignored = -1
+            pos = tf.cast(tf.greater_equal(labels, 1.0), tf.float32) # 0, 1 (pos)
+            ignored = tf.cast(tf.equal(labels, -1.0), tf.float32) * (-1) # 0, -1 (ignored)
+            labels = pos + ignored
 
             '''
-            Please note that when positive, labels may be >= 1.0: 
+            Please note that without the abovecorrection, when positive, labels may be >= 1.0: 
             Labels all start at -1
             If all iou < 0.7, the max anchor is set as positive and gets a +2.0 (==1.0)
             If that anchor also has iou < 0.3 it gets another +1.0 (==2.0)
@@ -509,9 +559,9 @@ class MRCNN(SODMatrix):
 
         """
         TODO: Calculates the smooth L1 losses
-        :param predicted_boxes:
-        :param gtboxes:
-        :param object_weights:
+        :param predicted_boxes: The filtered anchors
+        :param gtboxes:ground truth boxes
+        :param object_weights: The mask map indicating whether this is an object or not
         :return:
         """
 
