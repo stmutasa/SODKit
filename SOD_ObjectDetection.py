@@ -10,6 +10,7 @@ from SODNetwork import np
 from SODNetwork import SODMatrix
 from SOD_ResNet import ResNet
 from SOD_DenseNet import DenseNet
+import tensorflow.contrib.slim as slim
 
 
 class MRCNN(SODMatrix):
@@ -158,7 +159,7 @@ class MRCNN(SODMatrix):
 
         # Under new name scope (not get_variable), clean up the anchors generated during training
         with tf.name_scope('RPNN_Forward'):
-            if self.training_phase:
+            if self.training_phase is True:
 
                 # Remove outside anchor boxes by returning only the indices of the valid anchors
                 valid_indices = self._filter_outside_anchors(anchors, self.Image_size)
@@ -172,7 +173,7 @@ class MRCNN(SODMatrix):
                 self.anchors, self.RPN_class_logits, self.RPN_box_logits = anchors, class_logits, box_logits
 
 
-    def RPN_Post_process(self, summary=None):
+    def RPN_Post_Process(self, summary=None):
 
         """
         This function first creates a minibatch by attempting to combine equal positive and negative box proposals
@@ -224,6 +225,60 @@ class MRCNN(SODMatrix):
 
             self.location_loss = location_loss
             self.classification_loss = classification_loss
+
+
+    def RPN_Send_Proposals(self):
+
+        """
+        This function runs for training and testing. It sends the regions that the RPN detects as object through to the Fast RCNN
+        :return:
+        """
+
+        with tf.variable_scope('RPN_Proposals'):
+
+            # Retreive decoded boxes
+            rpn_decode_boxes = self._decode(self.RPN_box_logits, self.anchors)
+
+            # Get softmax scores of the rpn boxes. Retreive just the score for the object column
+            rpn_softmax_scores = slim.softmax(self.RPN_class_logits)
+            rpn_object_score = rpn_softmax_scores[:, 1]
+
+            # During testing, just clip the proposals to the image boundaries
+            if self.training_phase is False:
+                rpn_decode_boxes = self._clip_boxes_to_img_boundaries(rpn_decode_boxes, self.Image_size)
+
+            # This appears to limit the number of proposals that get sent to NMS
+            # if self.top_k_nms:
+            #     rpn_object_score, top_k_indices = tf.nn.top_k(rpn_object_score, k=self.top_k_nms)
+            #     rpn_decode_boxes = tf.gather(rpn_decode_boxes, top_k_indices)
+
+            # Perform the NMS. Test and train will output different values
+            if self.training_phase is False: valid_indices = self._non_max_suppression(rpn_decode_boxes, rpn_object_score,
+                                                            max_output_size=self.POST_NMS_ROIS_testing, iou_threshold=self.RPN_nms_upper_threshold)
+
+            else: valid_indices = self._non_max_suppression(rpn_decode_boxes, rpn_object_score,
+                                    max_output_size=self.POST_NMS_ROIS_testing, iou_threshold=self.RPN_nms_upper_threshold)
+
+            # Now just retreive what's left
+            valid_boxes = tf.gather(rpn_decode_boxes, valid_indices)
+            valid_scores = tf.gather(rpn_object_score, valid_indices)
+
+            # TODO: Minimum amount of proposals
+            self.max_proposals_num = 200
+
+            # If not enough boxes are left, pad with zeros
+            rpn_proposals_boxes, rpn_proposals_scores = tf.cond(tf.less(tf.shape(valid_boxes)[0], self.max_proposals_num),
+                    lambda: self._pad_boxes_zeros(valid_boxes, valid_scores,self.max_proposals_num),
+                    lambda: (valid_boxes, valid_scores))
+
+            # Testing TODO
+            self.t1, self.t2, self.t3 = rpn_proposals_boxes, rpn_proposals_scores, self.training_phase
+            return
+
+            return rpn_proposals_boxes, rpn_proposals_scores
+
+
+
 
     """
     RPN hidden Inside functions
@@ -1048,3 +1103,65 @@ class MRCNN(SODMatrix):
             if summary: self._activation_summary(conv)
 
             return conv
+
+    def _clip_boxes_to_img_boundaries(self, decode_boxes, img_shape):
+
+        '''
+        Pretty self explanatory name eh?
+        :param decode_boxes:
+        :return: decode boxes, and already clip to boundaries
+        '''
+
+        # xmin, ymin, xmax, ymax = tf.unstack(tf.transpose(decode_boxes))
+        with tf.name_scope('clip_boxes_to_img_boundaries'):
+            ymin, xmin, ymax, xmax = tf.unstack(decode_boxes, axis=1)
+            img_h, img_w = img_shape[1], img_shape[2]
+
+            xmin = tf.maximum(xmin, 0.0)
+            xmin = tf.minimum(xmin, tf.cast(img_w, tf.float32))
+
+            ymin = tf.maximum(ymin, 0.0)
+            ymin = tf.minimum(ymin, tf.cast(img_h, tf.float32))  # avoid xmin > img_w, ymin > img_h
+
+            xmax = tf.minimum(xmax, tf.cast(img_w, tf.float32))
+            ymax = tf.minimum(ymax, tf.cast(img_h, tf.float32))
+
+            return tf.transpose(tf.stack([ymin, xmin, ymax, xmax]))
+
+    def _non_max_suppression(self, boxes, scores, iou_threshold, max_output_size, name='non_maximal_suppression'):
+
+        """
+        Tensorflow has a function for us!
+        :param boxes:
+        :param scores:
+        :param iou_threshold:
+        :param max_output_size:
+        :param name:
+        :return:
+        """
+
+        with tf.variable_scope(name):
+
+            nms_index = tf.image.non_max_suppression(boxes=boxes, scores=scores, max_output_size=max_output_size, iou_threshold=iou_threshold, name=name )
+            return nms_index
+
+    def _pad_boxes_zeros(self, boxes, scores, max_num_of_boxes):
+
+        '''
+        if num of boxes is less than max num of boxes, we need to pad with zeros[0, 0, 0, 0]
+        :param boxes:
+        :param scores: [-1]
+        :param max_num_of_boxes:
+        :return:
+        '''
+
+        pad_num = tf.cast(max_num_of_boxes, tf.int32) - tf.shape(boxes)[0]
+
+        zero_boxes = tf.zeros(shape=[pad_num, 4], dtype=boxes.dtype)
+        zero_scores = tf.zeros(shape=[pad_num], dtype=scores.dtype)
+
+        final_boxes = tf.concat([boxes, zero_boxes], axis=0)
+
+        final_scores = tf.concat([scores, zero_scores], axis=0)
+
+        return final_boxes, final_scores
