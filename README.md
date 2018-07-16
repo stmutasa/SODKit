@@ -15,3 +15,5 @@ SOD_DenseNet contains a wrapper for setting up a Dense network in 2D, 2.5D or a 
 SOD_ObjectDetection contains wrappers for The popular object detection networks Faster-RCNN and MASK-RCNN
 
 SOD_Display contains wrappers for displaying data in various ways from 3D volumes, mosaics to histograms and bar plots.
+
+SOD_Recurrent contains the class utilized in implementing recurrent convolutional neural networks
