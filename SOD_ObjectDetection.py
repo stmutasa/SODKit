@@ -24,8 +24,8 @@ class MRCNN(SODMatrix):
     def __init__(self, phase_train, GPU_count=1, Images_per_gpu=2, FCN=256, K1=32, Num_classes=1, FPN_layers=64,
                  RPN_anchor_scales=(1, 0.5), RPN_anchor_ratios=[0.5, 1, 2], Image_size=512, RPN_base_anchor_size=[6, 13, 20, 35],
                  RPN_nms_upper_threshold=0.7, RPN_nms_lower_threshold=0.3, RPN_anchors_per_image=256, RPN_class_loss_weight=1.0,
-                 batch_size=8, max_proposals=32, RPN_batch_size=256, RPN_batch_positives_ratio=0.5, RPN_box_loss_weight=1.0,
-                 POST_NMS_ROIS_training=2000, POST_NMS_ROIS_testing=1000, Use_mini_mask=False, Mini_mask_shape=[56, 56]):
+                 batch_size=8, max_proposals=32, RPN_batch_size=256, RPN_batch_positives_ratio=0.5, RPN_box_loss_weight=1.0, PRE_NMS_top_k=8192,
+                 POST_NMS_ROIS_training=512, POST_NMS_ROIS_testing=256, Use_mini_mask=False, Mini_mask_shape=[56, 56]):
 
         """
         Instance specific variables
@@ -37,8 +37,7 @@ class MRCNN(SODMatrix):
         :param FPN_layers: The number of layers in the FPN outputs
 
         :param: Image_size: The size of the input images
-        :param batch_size: the batch size of the whole network
-        :param max_proposals: The number of proposals per batch
+        :param batch_size: The number of input images processed at a time
         :param GPU_count: Number of GPUs to use
         :param Images_per_gpu: Number of images to train with on each GPU. Use highest number gpu can handle
 
@@ -55,6 +54,9 @@ class MRCNN(SODMatrix):
 
         :param POST_NMS_ROIS_training: ROIs kept after non-maximum supression (training)
         :param POST_NMS_ROIS_testing: ROIs kept after non-maximum supression (inference)
+        :param max_proposals: The number of proposals output by the RPN during testing or training
+        :param PRE_NMS_top_k: Limit the # of RPN outputs that get sent to NMS to this number. Must be far larger than max_proposals
+
         :param Use_mini_mask: If enabled, resizes instance masks to a smaller size to reduce memory usage
         :param Mini_mask_shape: (height, width) of the mini-mask
         """
@@ -75,15 +77,19 @@ class MRCNN(SODMatrix):
         self.RPN_batch_positives_ratio = RPN_batch_positives_ratio
         self.RPN_batch_size = RPN_batch_size
 
+        # RPN Proposal variables
         self.POST_NMS_ROIS_training = POST_NMS_ROIS_training
         self.POST_NMS_ROIS_testing = POST_NMS_ROIS_testing
+        self.max_proposals = max_proposals
+        self.PRE_NMS_top_k = PRE_NMS_top_k
+
         self.Use_mini_mask = Use_mini_mask
         self.Mini_mask_shape = Mini_mask_shape
         self.Image_size = Image_size
         self.RPN_base_anchor_size = RPN_base_anchor_size
         self.batch_size = batch_size
-        self.max_proposals = max_proposals
 
+        # Loss function weights
         self.RPN_class_loss_weight = RPN_class_loss_weight
         self.RPN_box_loss_weight = RPN_box_loss_weight
 
@@ -195,8 +201,8 @@ class MRCNN(SODMatrix):
             minibatch_box_logits = tf.gather(self.RPN_box_logits, minibatch_indices)
 
             # Calculate deltas required to transform anchors to gtboxes, aka the loss
-            minibatch_encoded_gtboxes = self._encode(minibatch_anchor_matched_gtboxes, minibatch_anchors)
-            minibatch_decoded_boxes = self._decode(minibatch_encoded_gtboxes, minibatch_anchors) # For the image summary
+            minibatch_encoded_gtboxes = self._find_deltas(minibatch_anchor_matched_gtboxes, minibatch_anchors)
+            minibatch_decoded_boxes = self._apply_deltas(minibatch_encoded_gtboxes, minibatch_anchors) # For the image summary
 
             # TODO: if we want to generate a summary image
             if summary:
@@ -227,7 +233,7 @@ class MRCNN(SODMatrix):
             self.classification_loss = classification_loss
 
 
-    def RPN_Send_Proposals(self):
+    def RPN_Get_Proposals(self):
 
         """
         This function runs for training and testing. It sends the regions that the RPN detects as object through to the Fast RCNN
@@ -236,48 +242,44 @@ class MRCNN(SODMatrix):
 
         with tf.variable_scope('RPN_Proposals'):
 
-            # Retreive decoded boxes
-            rpn_decode_boxes = self._decode(self.RPN_box_logits, self.anchors)
+            # Apply the box logit adjustments to the anchor boxes TODO: This way is inefficient
+            rpn_adjusted_boxes = self._apply_deltas(self.RPN_box_logits, self.anchors)
 
             # Get softmax scores of the rpn boxes. Retreive just the score for the object column
             rpn_softmax_scores = slim.softmax(self.RPN_class_logits)
             rpn_object_score = rpn_softmax_scores[:, 1]
 
-            # During testing, just clip the proposals to the image boundaries
+            # During testing, clip abberant box adjustments to the image boundaries.
+            # TODO: Add in the image sources somehow here... Probably just copy again
+            # TODO: may actually have to do this for early training phase
             if self.training_phase is False:
-                rpn_decode_boxes = self._clip_boxes_to_img_boundaries(rpn_decode_boxes, self.Image_size)
+                rpn_adjusted_boxes = self._clip_boxes_to_img_boundaries(rpn_adjusted_boxes, self.Image_size)
 
-            # This appears to limit the number of proposals that get sent to NMS
-            # if self.top_k_nms:
-            #     rpn_object_score, top_k_indices = tf.nn.top_k(rpn_object_score, k=self.top_k_nms)
-            #     rpn_decode_boxes = tf.gather(rpn_decode_boxes, top_k_indices)
+            # Limit the number of proposals that get sent to NMS
+            rpn_object_score, top_k_indices = tf.nn.top_k(rpn_object_score, k=self.PRE_NMS_top_k)
+            rpn_adjusted_boxes = tf.gather(rpn_adjusted_boxes, top_k_indices)
+            rpn_adjusted_img_sources = tf.gather(self.anchor_img_source, top_k_indices)
 
-            # Perform the NMS. Test and train will output different values
-            if self.training_phase is False: valid_indices = self._non_max_suppression(rpn_decode_boxes, rpn_object_score,
-                                                            max_output_size=self.POST_NMS_ROIS_testing, iou_threshold=self.RPN_nms_upper_threshold)
+            # Perform the NMS to return indices of single predictions. Test and train will output different values
+            if self.training_phase is False:
+                valid_indices = self._non_max_suppression(rpn_adjusted_boxes, rpn_object_score,
+                                max_output_size=self.POST_NMS_ROIS_testing, iou_threshold=self.RPN_nms_upper_threshold)
 
-            else: valid_indices = self._non_max_suppression(rpn_decode_boxes, rpn_object_score,
-                                    max_output_size=self.POST_NMS_ROIS_testing, iou_threshold=self.RPN_nms_upper_threshold)
+            else:
+                valid_indices = self._non_max_suppression(rpn_adjusted_boxes, rpn_object_score,
+                                max_output_size=self.POST_NMS_ROIS_testing, iou_threshold=self.RPN_nms_upper_threshold)
 
-            # Now just retreive what's left
-            valid_boxes = tf.gather(rpn_decode_boxes, valid_indices)
+            # Retreive the actual the adjusted anchors/predictions/images that are A: in PRE_NMS_Top_k object predictions and B: Passed NMS with threshold iou
+            valid_boxes = tf.gather(rpn_adjusted_boxes, valid_indices)
             valid_scores = tf.gather(rpn_object_score, valid_indices)
-
-            # TODO: Minimum amount of proposals
-            self.max_proposals_num = 200
+            valid_img_sources = tf.gather(rpn_adjusted_img_sources, valid_indices)
 
             # If not enough boxes are left, pad with zeros
-            rpn_proposals_boxes, rpn_proposals_scores = tf.cond(tf.less(tf.shape(valid_boxes)[0], self.max_proposals_num),
-                    lambda: self._pad_boxes_zeros(valid_boxes, valid_scores,self.max_proposals_num),
+            rpn_proposals_boxes, rpn_proposals_scores = tf.cond(tf.less(tf.shape(valid_boxes)[0], self.max_proposals),
+                    lambda: self._pad_boxes_zeros(valid_boxes, valid_scores,self.max_proposals),
                     lambda: (valid_boxes, valid_scores))
 
-            # Testing TODO
-            self.t1, self.t2, self.t3 = rpn_proposals_boxes, rpn_proposals_scores, self.training_phase
-            return
-
             return rpn_proposals_boxes, rpn_proposals_scores
-
-
 
 
     """
@@ -965,11 +967,10 @@ class MRCNN(SODMatrix):
 
             return tf.transpose(tf.stack([tf.zeros([num_anchors_per_location, ]), tf.zeros([num_anchors_per_location, ]), ws, hs]))
 
-    def _encode(self, boxes, anchors, scale_factors=None):
+    def _find_deltas(self, boxes, anchors, scale_factors=None):
 
         """
-        Encode a box collection with respect to anchor collection.
-        AKA generate deltas to transform source offsets into destination anchors
+        Generate deltas to transform source offsets into destination anchors
         :param boxes: BoxList holding N boxes to be encoded.
         :param anchors: BoxList of anchors.
         :param: scale_factors: scales location targets when using joint training
@@ -1011,14 +1012,14 @@ class MRCNN(SODMatrix):
 
         return tf.transpose(tf.stack([ty, tx, th, tw]))
 
-    def _decode(self, rel_codes, anchors, scale_factors=None):
+    def _apply_deltas(self, rel_codes, anchors, scale_factors=None):
 
-        """Decode relative codes to boxes.
-        Args:
-          rel_codes: a tensor representing N anchor-encoded boxes.
-          anchors: BoxList of anchors.
-        Returns:
-          boxes: BoxList holding N bounding boxes.
+        """
+        Applies the delta offsets to the anchors to find
+        :param rel_codes: a tensor representing N anchor-encoded boxes.
+        :param anchors: BoxList of anchors.
+        :param scale_factors:
+        :return: boxes: BoxList holding N bounding boxes.
         """
 
         # Convert anchors to the center coordinate representation.
@@ -1107,24 +1108,24 @@ class MRCNN(SODMatrix):
     def _clip_boxes_to_img_boundaries(self, decode_boxes, img_shape):
 
         '''
-        Pretty self explanatory name eh?
-        :param decode_boxes:
-        :return: decode boxes, and already clip to boundaries
+        For testing: Whe the RPN adjusts the anchor boxes to lie outside the image boundaries, clip them shits back in
+        :param decode_boxes: The boxes to clip, adjusted RPN outputs
+        :param img_shape: the dimension of the image
+        :return: decode boxes
         '''
 
-        # xmin, ymin, xmax, ymax = tf.unstack(tf.transpose(decode_boxes))
         with tf.name_scope('clip_boxes_to_img_boundaries'):
+
             ymin, xmin, ymax, xmax = tf.unstack(decode_boxes, axis=1)
-            img_h, img_w = img_shape[1], img_shape[2]
 
             xmin = tf.maximum(xmin, 0.0)
-            xmin = tf.minimum(xmin, tf.cast(img_w, tf.float32))
+            xmin = tf.minimum(xmin, tf.cast(img_shape, tf.float32))
 
             ymin = tf.maximum(ymin, 0.0)
-            ymin = tf.minimum(ymin, tf.cast(img_h, tf.float32))  # avoid xmin > img_w, ymin > img_h
+            ymin = tf.minimum(ymin, tf.cast(img_shape, tf.float32))  # avoid xmin > img_w, ymin > img_h
 
-            xmax = tf.minimum(xmax, tf.cast(img_w, tf.float32))
-            ymax = tf.minimum(ymax, tf.cast(img_h, tf.float32))
+            xmax = tf.minimum(xmax, tf.cast(img_shape, tf.float32))
+            ymax = tf.minimum(ymax, tf.cast(img_shape, tf.float32))
 
             return tf.transpose(tf.stack([ymin, xmin, ymax, xmax]))
 
