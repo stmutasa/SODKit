@@ -25,7 +25,8 @@ class MRCNN(SODMatrix):
                  RPN_anchor_scales=(1, 0.5), RPN_anchor_ratios=[0.5, 1, 2], Image_size=512, RPN_base_anchor_size=[6, 13, 20, 35],
                  RPN_nms_upper_threshold=0.7, RPN_nms_lower_threshold=0.3, RPN_anchors_per_image=256, RPN_class_loss_weight=1.0,
                  batch_size=8, max_proposals=32, RPN_batch_size=256, RPN_batch_positives_ratio=0.5, RPN_box_loss_weight=1.0, PRE_NMS_top_k=8192,
-                 POST_NMS_ROIS_training=512, POST_NMS_ROIS_testing=256, Use_mini_mask=False, Mini_mask_shape=[56, 56], FCNN_positives_threshold=0.5):
+                 POST_NMS_ROIS_training=512, POST_NMS_ROIS_testing=256, Use_mini_mask=False, Mini_mask_shape=[56, 56], FCNN_positives_threshold=0.5,
+                 FCNN_batch_size=256, FCNN_batch_positives_ratio=0.5, FCN_box_loss_weight=1.0, FCN_class_loss_weight=1.0):
 
         """
         Instance specific variables
@@ -63,6 +64,7 @@ class MRCNN(SODMatrix):
         :param Mini_mask_shape: (height, width) of the mini-mask
         """
 
+        # Baseline parameters for FPN
         self.phase_train = phase_train
         self.GPU_count = GPU_count
         self.Images_per_gpu = Images_per_gpu
@@ -71,6 +73,7 @@ class MRCNN(SODMatrix):
         self.Num_classes = Num_classes
         self.FPN_layers = FPN_layers
 
+        # Region proposal network parameters
         self.RPN_anchor_scales = RPN_anchor_scales
         self.RPN_anchor_ratios = RPN_anchor_ratios
         self.RPN_nms_upper_threshold = RPN_nms_upper_threshold
@@ -79,7 +82,10 @@ class MRCNN(SODMatrix):
         self.RPN_batch_positives_ratio = RPN_batch_positives_ratio
         self.RPN_batch_size = RPN_batch_size
 
+        # Faster RCNN head parameters
         self.FCNN_positives_threshold = FCNN_positives_threshold
+        self.FCNN_batch_positives_ratio = FCNN_batch_positives_ratio
+        self.FCNN_batch_size = FCNN_batch_size
 
         # RPN Proposal variables
         self.POST_NMS_ROIS_training = POST_NMS_ROIS_training
@@ -96,6 +102,8 @@ class MRCNN(SODMatrix):
         # Loss function weights
         self.RPN_class_loss_weight = RPN_class_loss_weight
         self.RPN_box_loss_weight = RPN_box_loss_weight
+        self.FCN_box_loss_weight = FCN_box_loss_weight
+        self.FCN_class_loss_weight = FCN_class_loss_weight
 
         # Keeping track of the layers and losses
         # self.RPN_ROI = None
@@ -316,8 +324,8 @@ class MRCNN(SODMatrix):
         # Perform the convolution
         self._FRCNN_conv()
 
-        # Process proposals
-        self._FRCNN_process_proposals()
+        # Process proposals, make minibatches, and retreive loss
+        self._FRCNN_make_minibatch()
 
 
     """
@@ -776,24 +784,70 @@ class MRCNN(SODMatrix):
             matches = tf.cast(tf.argmax(iou, axis=1), tf.int32)
             max_iou_each_row = tf.reduce_max(iou, axis=1)
 
-            # Retreive positives
-            positives = tf.cast(tf.greater_equal(max_iou_each_row, self.FCNN_positives_threshold), tf.int32)
-            reference_matched_gtboxes = tf.gather(gtboxes, matches)
+            # Saved GT boxes. gt_boxes was saved as 5 columns with last column referring to the class
+            gtboxes = tf.cast(tf.reshape(self.gt_boxes[:, :, :-1], [-1, 4]), tf.float32)
+            gtlabels = tf.cast(tf.reshape(self.gt_boxes[:, :, -1], [-1, 1]), tf.float32)
 
-            self.t1, self.t2, self.t3 = max_iou_each_row, source, matches
-            return
+            # Retreive positive matches (1 = match) and any matched GTBoxes (again 0 = 0 or no match but will be accounnted for in mask)
+            positives = tf.cast(tf.greater_equal(max_iou_each_row, self.FCNN_positives_threshold), tf.float32)
+            reference_matched_gtboxes = tf.gather(gtboxes, matches)
 
             # Generate the object mask to prevent gradient calculation on background boxes
             object_mask = tf.cast(positives, tf.float32)
 
             # Retreive labels
-            label = tf.gather(self.gt_boxes[::, -1])
-            label = label * positives
+            label = tf.gather(gtlabels, matches)
+            label = tf.squeeze(label) * tf.squeeze(positives)
 
             return reference_matched_gtboxes, object_mask, label
 
+    def _FRCNN_make_minibatch(self):
 
+        """
+        Makes a minibatch to help us calculate loss in the FRCNN
+        :return:
+        """
 
+        with tf.variable_scope('FRCNN_Minibatch'):
+
+            # Retreive the  processed proposals with corresponding object mask and labels
+            gtmatches, object_mask, labels = self._FRCNN_process_proposals()
+
+            # Positive indices this time are anywhere the object mask is not 0. The reverse is true too
+            positive_indices = tf.reshape(tf.where(tf.not_equal(object_mask, 0.0)), [-1])
+            negative_indices = tf.reshape(tf.where(tf.equal(object_mask, 0.0)), [-1])
+
+            # Calculate the number of to include (scalar)
+            num_positives = tf.minimum(tf.shape(positive_indices)[0], tf.cast(self.FCNN_batch_positives_ratio * self.FCNN_batch_size, tf.int32))
+            num_negatives = tf.minimum(self.RPN_batch_size - num_positives, tf.shape(negative_indices)[0])
+
+            # Retreive a random selection of the positives and negatives
+            positive_indices = tf.slice(tf.random_shuffle(positive_indices), begin=[0], size=[num_positives])
+            negative_indices = tf.slice(tf.random_shuffle(negative_indices), begin=[0], size=[num_negatives])
+
+            # Generate positive proposals
+            positive_proposals = tf.gather(self.FRCNN_rois, positive_indices)
+            positive_sources = tf.gather(self.FRCNN_srcs, positive_indices)
+
+            #TODO: Testing
+            self.t1, self.t2, self.t3 = positive_proposals, positive_sources, negative_indices
+            return
+
+            # # Join together to create the minibatch indices and randomize
+            # minibatch_indices = tf.concat([positive_indices, negative_indices], axis=0)
+            # minibatch_indices = tf.random_shuffle(minibatch_indices)
+            #
+            # # Retreive the ground truth boxes for the indices in the generated minibatch
+            # minibatch_anchor_matched_gtboxes = tf.gather(anchors_matched_gtboxes, minibatch_indices)
+            #
+            # # Regenerate the labels and object mask for the indices that actually made it to the minibatch
+            # object_mask = tf.gather(object_mask, minibatch_indices)
+            # labels = tf.cast(tf.gather(labels, minibatch_indices), tf.int32)
+            #
+            # # Make labels one hot
+            # labels_one_hot = tf.one_hot(labels, depth=2)
+            #
+            # return minibatch_indices, minibatch_anchor_matched_gtboxes, object_mask, labels_one_hot
 
     """
     Loss functions
