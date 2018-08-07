@@ -21,8 +21,8 @@ class MRCNN(SODMatrix):
 
     # Shared class variables here
 
-    def __init__(self, phase_train, GPU_count=1, Images_per_gpu=2, FCN=256, K1=32, Num_classes=1, FPN_layers=64,
-                 RPN_anchor_scales=(1, 0.5), RPN_anchor_ratios=[0.5, 1, 2], Image_size=512, RPN_base_anchor_size=[6, 13, 20, 35],
+    def __init__(self, phase_train, GPU_count=1, Images_per_gpu=2, FC_nodes=256, K1=32, num_classes=1, FPN_layers=64,
+                 RPN_anchor_scales=(1, 0.5), RPN_anchor_ratios=[0.5, 1, 2], image_size=512, RPN_base_anchor_size=[6, 13, 20, 35],
                  RPN_nms_upper_threshold=0.7, RPN_nms_lower_threshold=0.3, RPN_anchors_per_image=256, RPN_class_loss_weight=1.0,
                  batch_size=8, max_proposals=32, RPN_batch_size=256, RPN_batch_positives_ratio=0.5, RPN_box_loss_weight=1.0, PRE_NMS_top_k=8192,
                  POST_NMS_ROIS_training=512, POST_NMS_ROIS_testing=256, Use_mini_mask=False, Mini_mask_shape=[56, 56], FRCNN_positives_threshold=0.5,
@@ -32,12 +32,12 @@ class MRCNN(SODMatrix):
         Instance specific variables
 
         :param phase_train: Training or testing mode
-        :param FCN: Number of neurons in the first fully connected layer
+        :param FC_nodes: Number of neurons in the first fully connected layer
         :param K1: Number of filters in the first layer
-        :param Num_classes: Number of classification classes. Does not include the background category
+        :param num_classes: Number of classification classes. Does not include the background category
         :param FPN_layers: The number of layers in the FPN outputs
 
-        :param Image_size: The size of the input images
+        :param image_size: The size of the input images
         :param batch_size: The number of input images processed at a time
         :param GPU_count: Number of GPUs to use
         :param Images_per_gpu: Number of images to train with on each GPU. Use highest number gpu can handle
@@ -68,9 +68,11 @@ class MRCNN(SODMatrix):
         self.phase_train = phase_train
         self.GPU_count = GPU_count
         self.Images_per_gpu = Images_per_gpu
-        self.FCN = FCN
+        self.FC_nodes = FC_nodes
         self.K1 = K1
-        self.Num_classes = Num_classes
+        self.num_classes = num_classes
+        self.batch_size = batch_size
+        self.image_size = image_size
         self.FPN_layers = FPN_layers
 
         # Region proposal network parameters
@@ -95,9 +97,7 @@ class MRCNN(SODMatrix):
 
         self.Use_mini_mask = Use_mini_mask
         self.Mini_mask_shape = Mini_mask_shape
-        self.Image_size = Image_size
         self.RPN_base_anchor_size = RPN_base_anchor_size
-        self.batch_size = batch_size
 
         # Loss function weights
         self.RPN_class_loss_weight = RPN_class_loss_weight
@@ -185,7 +185,7 @@ class MRCNN(SODMatrix):
             if self.training_phase is True:
 
                 # Remove outside anchor boxes by returning only the indices of the valid anchors
-                valid_indices = self._filter_outside_anchors(anchors, self.Image_size)
+                valid_indices = self._filter_outside_anchors(anchors, self.image_size)
                 valid_anchors = tf.gather(anchors, valid_indices)
                 valid_cls_logits, valid_box_logits = tf.gather(class_logits, valid_indices), tf.gather(box_logits, valid_indices)
 
@@ -271,7 +271,7 @@ class MRCNN(SODMatrix):
             # TODO: Add in the image sources somehow here... Probably just copy again
             # TODO: may actually have to do this for early training phase
             if self.training_phase is False:
-                rpn_adjusted_boxes = self._clip_boxes_to_img_boundaries(rpn_adjusted_boxes, self.Image_size)
+                rpn_adjusted_boxes = self._clip_boxes_to_img_boundaries(rpn_adjusted_boxes, self.image_size)
 
             # Limit the number of proposals that get sent to NMS
             rpn_object_score, top_k_indices = tf.nn.top_k(rpn_object_score, k=self.PRE_NMS_top_k)
@@ -396,7 +396,7 @@ class MRCNN(SODMatrix):
                     fm_size = tf.cast(tf.shape(FPN_scale)[2], tf.float32)
 
                     # Calculate feature stride
-                    feature_stride = tf.cast(self.Image_size // fm_size, tf.float32)
+                    feature_stride = tf.cast(self.image_size // fm_size, tf.float32)
 
                     # Base anchor sizes match feature map sizes. Generate anchors at this level
                     anchors = self._generate_anchors(fm_size, base_anchor_size, feature_stride, self.RPN_anchor_ratios, self.RPN_anchor_scales)
@@ -694,7 +694,7 @@ class MRCNN(SODMatrix):
                 boxes, sources = tf.reshape(boxes, [-1, 4]), tf.reshape(sources, [-1, 2])
 
                 # Normalize the boxes to the input image size.
-                rois = boxes / self.Image_size
+                rois = boxes / self.image_size
 
                 # Stop gradient propogation to ROI proposals
                 rois = tf.stop_gradient(rois)
@@ -722,14 +722,14 @@ class MRCNN(SODMatrix):
 
             # Run ROIs through the FCNs, dropout 1st layer if requested
             self.summary = True
-            conv = self.fc7_layer('Fc_1', self.FRCNN_rois, self.FCN, True, self.phase_train, BN=True)
-            conv = self._linear_layer('Fc_2', conv, self.FCN, phase_train=self.phase_train, BN=True, relu=True, add_bias=True, dim=self.FCN)
+            conv = self.fc7_layer('Fc_1', self.FRCNN_rois, self.FC_nodes, True, self.phase_train, BN=True)
+            conv = self._linear_layer('Fc_2', conv, self.FC_nodes, phase_train=self.phase_train, BN=True, relu=True, add_bias=True, dim=self.FC_nodes)
 
-            # Run them through the next FCN for class scores
-            self.FRCNN_box_logits = self._linear_layer('FCNN_classifier', conv, self.Num_classes + 1, dim=self.FCN, phase_train=self.phase_train)
+            # Run them through the next FC_nodes for class scores
+            self.FRCNN_class_logits = self._linear_layer('FCNN_classifier', conv, self.num_classes + 1, dim=self.FC_nodes, phase_train=self.phase_train)
 
-            # Run through the second FCN branch for box scores
-            self.FRCNN_class_logits = self._linear_layer('FCNN_regressor', conv, self.Num_classes * 4, dim=self.FCN, phase_train=self.phase_train)
+            # Run through the second FC_nodes branch for box scores
+            self.FRCNN_box_logits = self._linear_layer('FCNN_regressor', conv, self.num_classes * 4, dim=self.FC_nodes, phase_train=self.phase_train)
 
     def _FRCNN_process_proposals(self):
 
@@ -833,7 +833,7 @@ class MRCNN(SODMatrix):
             positive_rois = tf.gather(self.FRCNN_rois, positive_indices)
             positive_sources = tf.gather(self.FRCNN_srcs, positive_indices)
             positive_proposals = tf.gather(self.FRCNN_proposals, positive_indices)
-            img_shape = tf.cast(self.Image_size, tf.float32)
+            img_shape = tf.cast(self.image_size, tf.float32)
 
             # Join together to create the minibatch indices and randomize
             minibatch_indices = tf.concat([positive_indices, negative_indices], axis=0)
@@ -847,7 +847,7 @@ class MRCNN(SODMatrix):
             labels = tf.cast(tf.gather(labels, minibatch_indices), tf.int32)
 
             # Make labels one hot
-            labels_one_hot = tf.one_hot(labels, depth=self.Num_classes+1)
+            labels_one_hot = tf.one_hot(labels, depth=self.num_classes + 1)
 
             return minibatch_indices, minibatch_gtboxes, object_mask, labels_one_hot
 
@@ -869,16 +869,45 @@ class MRCNN(SODMatrix):
             minibatch_class_logits = tf.gather(self.FRCNN_class_logits, batch_indices)
             minibatch_sources = tf.gather(self.FRCNN_srcs, batch_indices)
 
-            self.t1, self.t2, self.t3 = minibatch_reference_boxes, minibatch_box_logits, minibatch_sources
-
-
             """
             TODO: Draw boxes with color here
             """
 
+            # Retreive the box deltas
+            gtbox_deltas = self._find_deltas(batch_gtboxes, minibatch_reference_boxes)
+            gtbox_deltas = tf.tile(gtbox_deltas, [1, self.num_classes])
 
+            class_weights_list = []
+            batch_lbl_one_hot = tf.reshape(batch_lbl_one_hot, [-1, self.num_classes + 1])
+            category_list = tf.unstack(batch_lbl_one_hot, axis=1)
 
+            for i in range(1, self.num_classes + 1):
+                tmp_class_weights = tf.ones(shape=[tf.shape(gtbox_deltas)[0], 4], dtype=tf.float32)
+                tmp_class_weights = tmp_class_weights * tf.expand_dims(category_list[i], axis=1)
+                class_weights_list.append(tmp_class_weights)
+            class_weights = tf.concat(class_weights_list, axis=1)  # [minibatch_size, num_classes*4]
 
+            # loss
+            with tf.variable_scope('frcnn_classification_loss'):
+
+                # Calculate the softmax class loss
+                fast_rcnn_classification_loss = tf.nn.softmax_cross_entropy_with_logits_v2(labels=batch_lbl_one_hot, logits=minibatch_class_logits)
+                fast_rcnn_classification_loss = tf.reduce_mean(fast_rcnn_classification_loss)
+                fast_rcnn_classification_loss *= self.FRCNN_class_loss_weight
+                tf.add_to_collection('losses', fast_rcnn_classification_loss)
+
+            with tf.variable_scope('frcnn_location_loss'):
+
+                # Calculate the smooth L1 loss for the boxes
+                fast_rcnn_location_loss = self._smooth_l1_loss(predicted_boxes=minibatch_box_logits, gtboxes=gtbox_deltas, object_weights=batch_object_mask, classes_weights=class_weights)
+                fast_rcnn_location_loss *= self.FRCNN_box_loss_weight
+                tf.add_to_collection('losses', fast_rcnn_location_loss)
+
+            # TODO: Testing return Currently class weights are 0... normal because no actual objects??
+            self.t1, self.t2, self.t3 = fast_rcnn_location_loss, fast_rcnn_classification_loss, class_weights
+            return
+
+            return fast_rcnn_location_loss, fast_rcnn_classification_loss
 
 
     """
