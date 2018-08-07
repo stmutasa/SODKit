@@ -246,8 +246,8 @@ class MRCNN(SODMatrix):
                 classification_loss *= self.RPN_class_loss_weight
                 tf.add_to_collection('losses', classification_loss)
 
-            self.location_loss = location_loss
-            self.classification_loss = classification_loss
+            self.RPN_location_loss = location_loss
+            self.RPN_classification_loss = classification_loss
 
 
     def RPN_Get_Proposals(self):
@@ -326,6 +326,40 @@ class MRCNN(SODMatrix):
 
         # Process proposals, make minibatches, and retreive loss
         self._FRCNN_loss()
+
+
+    def Fast_RCNN_Predict(self):
+
+        """
+        Run an RCNN forward pass and NMS for testing
+        :return:
+        """
+
+        with tf.variable_scope('FRCNN_Predict'):
+
+            # Normalize the scores
+            FRCNN_softmax_scores = tf.nn.softmax(self.FRCNN_class_logits)
+
+            # Boxes
+            FRCNN_boxes = tf.reshape(self.FRCNN_box_logits, [-1, 4])
+
+            # Reference boxes. TODO: batchify this
+            FRCNN_reference_boxes = tf.tile(self.gt_boxes, [1, self.num_classes])
+            FRCNN_reference_boxes = tf.reshape(FRCNN_reference_boxes, [-1, 4])
+
+            # Encode and clip the boxes
+            FRCNN_clipped_boxes = self._find_deltas(FRCNN_boxes, FRCNN_reference_boxes)
+            FRCNN_clipped_boxes = self._clip_boxes_to_img_boundaries(FRCNN_clipped_boxes, self.image_size)
+
+            # Multiclass NMS
+            FRCNN_nms_boxes = tf.reshape(FRCNN_clipped_boxes, [-1, self.num_classes*4])
+            FRCNN_nms_boxes, FRCNN_score, num_objects, detection_category = self._FRCNN_proposals_only()
+
+            # TODO: Testing
+            self.t1, self.t2, self.t3 = FRCNN_softmax_scores
+            return
+
+            return FRCNN_nms_boxes, FRCNN_score, num_objects, detection_category
 
 
     """
@@ -903,11 +937,21 @@ class MRCNN(SODMatrix):
                 fast_rcnn_location_loss *= self.FRCNN_box_loss_weight
                 tf.add_to_collection('losses', fast_rcnn_location_loss)
 
-            # TODO: Testing return Currently class weights are 0... normal because no actual objects??
-            self.t1, self.t2, self.t3 = fast_rcnn_location_loss, fast_rcnn_classification_loss, class_weights
-            return
+            self.FRCNN_location_loss = fast_rcnn_location_loss
+            self.FRCNN_classification_loss = fast_rcnn_classification_loss
 
-            return fast_rcnn_location_loss, fast_rcnn_classification_loss
+    def _FRCNN_proposals_only(self):
+
+        """
+        Utility function for running a forward pass only without loss calculation and performing NMS
+        :return:
+        """
+
+        with tf.variable_scope('FRCNN_Proposals_only'):
+
+            return 1, 2, 3, 4
+
+
 
 
     """
