@@ -215,6 +215,41 @@ class SODLoader():
         return image, accno, dims, window, photometric
 
 
+    def Retrieve_DICOM_Header(self, path):
+
+        # Load the Dicom
+        try:
+            ndimage = dicom.read_file(path)
+        except:
+            print('For some reason, cant load: %s' % path)
+            return
+
+        # Retreive the dimensions of the scan
+        dims = np.array([int(ndimage.Columns), int(ndimage.Rows)])
+
+        # Retreive window level if available
+        try:
+            window = [int(ndimage.WindowCenter), int(ndimage.WindowWidth)]
+        except:
+            window = None
+
+        # Retreive photometric interpretation (1 = negative XRay) if available
+        try:
+            photometric = int(ndimage.PhotometricInterpretation[-1])
+        except:
+            photometric = None
+
+        # Retreive the dummy accession number
+        accno = ndimage.AccessionNumber
+
+        # Retreive gender
+        sex = ndimage.PatientSex
+
+        return_dict = { 'dimensions': dims, 'window_level': window, 'photometric': photometric, 'accession': accno, 'sex': sex}
+
+        return return_dict
+
+
     def load_BoneAge(self, path, dtype=np.int16):
 
         """
