@@ -637,7 +637,7 @@ class MRCNN(SODMatrix):
                 batch_iou = self._iou_calculate(batch_anchors[z], batch_gtbox)
 
                 # Pad the ious with zeros along the y axis
-                paddings = tf.Variable([[0, 0], [column, (num_gt_boxes - (column + num_gt))]])
+                paddings = tf.Variable([[0, 0], [column, (num_gt_boxes - (column + num_gt))]], trainable=False)
                 batch_iou = tf.pad(batch_iou, paddings)
                 ious.append(batch_iou)
 
@@ -673,7 +673,7 @@ class MRCNN(SODMatrix):
 
             # Retreive the negatives with iou < 0.3 (default)
             negatives = tf.less(max_iou_each_row, self.RPN_nms_lower_threshold)
-            negatives = tf.logical_and(negatives, tf.greater_equal(max_iou_each_row, 0.1))
+            negatives = tf.cast(tf.logical_and(negatives, tf.greater_equal(max_iou_each_row, 0.1)), tf.float32)
 
             # Update the labels with the negatives: +ive = 1, -ive = 0, ignored = -1
             labels += tf.cast(negatives, tf.float32) # +ive = 1, -ive = 0, ignored = -1
@@ -801,7 +801,7 @@ class MRCNN(SODMatrix):
                 batch_iou = self._iou_calculate(batch_proposals, batch_gtbox)
 
                 # Pad the ious with zeros along the y axis?
-                paddings = tf.Variable([[0, 0], [column, (num_gt_boxes - (column + num_gt))]])
+                paddings = tf.Variable([[0, 0], [column, (num_gt_boxes - (column + num_gt))]], trainable=False)
                 batch_iou = tf.pad(batch_iou, paddings)
                 ious.append(batch_iou)
 
@@ -950,8 +950,6 @@ class MRCNN(SODMatrix):
         with tf.variable_scope('FRCNN_Proposals_only'):
 
             return 1, 2, 3, 4
-
-
 
 
     """
