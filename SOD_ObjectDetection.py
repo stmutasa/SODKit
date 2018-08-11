@@ -12,6 +12,8 @@ from SOD_ResNet import ResNet
 from SOD_DenseNet import DenseNet
 import tensorflow.contrib.slim as slim
 
+import cv2
+
 
 class MRCNN(SODMatrix):
 
@@ -1267,6 +1269,81 @@ class MRCNN(SODMatrix):
         recall = len(set(matched_gt_boxes)) / gt_boxes.shape[0]
 
         return recall, positive_ids
+
+    """
+    Display functoins to show the boxes being made
+    """
+
+    def draw_box_in_img_batch(self, img_batch, boxes, box_batch):
+
+        """
+        Draws a bounding box in the image batch
+        :param img_batch: the images including the batch number
+        :param boxes: input boxes without the batch dimension
+        :param box_batch: The batches index corresponding to each input box
+        :return:
+        """
+
+        # Normalize the boxes
+        boxes = tf.cast(boxes, tf.float32)
+        img_dims = tf.shape(img_batch)[2]
+        boxes = tf.div(boxes, img_dims)
+
+        # Now add to the batch. Use stack not concat to convert to R+1 tensor
+        box_list = tf.stack([box_batch, boxes], axis=0)
+
+        # Return a copy of the images with the bounding boxes drawn
+        return tf.image.draw_bounding_boxes(img_batch, box_list)
+
+
+    def draw_colored_box(self, img_batch, boxes, text, box_batch):
+
+        """
+        Draws boxes with color using open CV
+        :param img_batch: [batch, z, y, x, c]
+        :param boxes: [n, 4]
+        :param text: The text to put in the box
+        :param box_batch: What image batch each box index belongs to
+        :return:
+        """
+
+        # Define a draw box function with open CV to later tensorflow-rize
+        def draw_box_cv(img, boxes, text):
+
+            # Add a grayscale value to the image TODO: Was in color
+            img = img + np.array([116.779])
+            boxes = boxes.astype(np.int64)
+
+            # Normalize image
+            img = np.array(img * 255 / np.max(img), np.uint8)
+
+            # Loop through boxes we need to draw
+            for box in boxes:
+
+                # Retreive coordinates and a random color
+                ymin, xmin, ymax, xmax = box[0], box[1], box[2], box[3]
+                color = (np.random.randint(255), np.random.randint(255), np.random.randint(255))
+
+                # Generate a rectangle
+                cv2.rectangle(img, pt1=(xmin, ymin), pt2=(xmax, ymax), color=color, thickness=2)
+
+            # Generate overlay text
+            text = str(text)
+            cv2.putText(img , text=text, orig=((img.shape[1]) // 2, (img.shape[0]) //2), fontFace=3, fontScale=1, color=(255, 0, 0))
+
+            #
+            img = img[:, :, -1::-1]
+
+            return img
+
+        # Generate the image tensor
+        img_tensor = tf.squeeze(img_batch, 0)
+        img_tensor_with_boxes = tf.py_func(draw_box_cv, inp=[img_tensor, boxes, text], Tout=[tf.uint8])
+
+        # Reshape and return
+        img_tensor_with_boxes = tf.reshape(img_tensor_with_boxes, tf.shape(img_batch))
+        return img_tensor_with_boxes
+
 
     """
     Hidden Utility Functions
