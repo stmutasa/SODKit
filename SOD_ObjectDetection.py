@@ -1303,9 +1303,11 @@ class MRCNN(SODMatrix):
         :param img_batch: [batch, z, y, x, c]
         :param boxes: [n, 4]
         :param text: The text to put in the box
-        :param box_batch: What image batch each box index belongs to
+        :param box_batch: [batch] What image batch each box index belongs to
         :return:
         """
+
+        batch_images_with_boxes = []
 
         # Define a draw box function with open CV to later tensorflow-rize
         def draw_box_cv(img, boxes, text):
@@ -1336,13 +1338,24 @@ class MRCNN(SODMatrix):
 
             return img
 
-        # Generate the image tensor
-        img_tensor = tf.squeeze(img_batch, 0)
-        img_tensor_with_boxes = tf.py_func(draw_box_cv, inp=[img_tensor, boxes, text], Tout=[tf.uint8])
+        # Split the image batch into a list of individual image tensors
+        img_singles = tf.unstack(img_batch)
 
-        # Reshape and return
-        img_tensor_with_boxes = tf.reshape(img_tensor_with_boxes, tf.shape(img_batch))
-        return img_tensor_with_boxes
+        for z in range (len(img_singles)):
+
+            # Gather indices of the boxes for this specific image in the batch
+            box_indices = tf.reshape(tf.where(tf.equal(box_batch, z)), [-1])
+            img_boxes = tf.gather(boxes, box_indices)
+
+            # Generate the image tensor
+            img_tensor = tf.squeeze(img_singles[z], 0)
+            img_tensor_with_boxes = tf.py_func(draw_box_cv, inp=[img_tensor, img_boxes, text], Tout=[tf.uint8])
+
+            # Reshape and append
+            img_tensor_with_boxes = tf.reshape(img_tensor_with_boxes, tf.shape(img_batch))
+            batch_images_with_boxes.append(img_tensor_with_boxes)
+
+        return tf.concat(batch_images_with_boxes, axis=1)
 
 
     """

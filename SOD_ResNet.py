@@ -55,6 +55,72 @@ class ResNet(SODMatrix):
             return conv
 
 
+    def residual_block_3d(self, input_x, nb_layers, layer_name, K, F=3, padding='SAME', downsample=2, stanford=False):
+
+        """
+        Implements a block of residual layers at the same spatial dimension in 3 dimensions
+        :param input_x: Input, either from the last conv layer or the images
+        :param nb_layers: number of residual layers
+        :param layer_name: the baseline name of this block
+        :param K: feature map size
+        :param F: filter size
+        :param padding: SAME or VALID
+        :param downsample: 0 = None, 1 = Traditional, 2 = 2.5D downsample
+        :param stanford: whether to use stanford style layers
+        :return:
+        """
+
+        with tf.name_scope(layer_name):
+
+            # The first layer of this block
+            conv = self.residual_layer_3d((layer_name + '_res_0'), input_x, F, K, 1, padding, self.phase_train)
+
+            # Loop through the number of layers desired
+            for z in range(nb_layers):
+
+                # Perform the desired operations
+                conv = self.residual_layer_3d((layer_name + '_res_' + str(z + 1)), conv, F, K, 1, padding, self.phase_train)
+
+            # Perform a downsample. 0 = None, 1 = Traditional, 2 = 2.5D downsample
+            if downsample == 1: conv = self.convolution_3d((layer_name + '_res_down_'), conv, F, K*2, 2, padding, self.phase_train)
+
+            elif downsample == 2: conv = self.convolution_3d((layer_name + '_res_down_'), conv, [2, 3, 3], K*2, [1, 2, 2], 'VALID', self.phase_train)
+
+            return conv
+
+
+    def inception_block_3d(self, input_x, nb_layers, layer_name, K, padding='SAME', downsample=2):
+
+        """
+        Implements a block of inception layers at the same spatial dimension in 3 dimensions
+        :param input_x: Input, either from the last conv layer or the images
+        :param nb_layers: number of layers
+        :param layer_name: the baseline name of this block
+        :param F: filter size
+        :param padding: SAME or VALID
+        :param downsample: 0 = None, 1 = Traditional, 2 = 2.5D downsample
+        :return:
+        """
+
+        with tf.name_scope(layer_name):
+
+            # The first layer of this block
+            conv = self.inception_layer_3d((layer_name + '_inc_0'), input_x, K, 1, 1, padding, self.phase_train)
+
+            # Loop through the number of layers desired
+            for z in range(nb_layers):
+
+                # Perform the desired operations
+                conv = self.inception_layer_3d((layer_name + '_inc_' + str(z + 1)), conv, K, 1, 1, padding, self.phase_train)
+
+            # Perform a downsample. 0 = None, 1 = Traditional, 2 = 2.5D downsample
+            if downsample == 1: conv = self.convolution_3d((layer_name + '_res_down_'), conv, 3, K * 2, 2, padding, self.phase_train)
+
+            elif downsample == 2: conv = self.convolution_3d((layer_name + '_res_down_'), conv, [2, 3, 3], K * 2, [1, 2, 2], 'VALID', self.phase_train)
+
+            return conv
+
+
     def inception_block(self, input_x, nb_layers, layer_name, K, padding='SAME', downsample=True):
 
         """
@@ -80,8 +146,7 @@ class ResNet(SODMatrix):
                 conv = self.inception_layer((layer_name + '_inc_' + str(z + 1)), conv, K, 1, padding, self.phase_train)
 
             # Downsample if requested
-            if downsample:
-                conv = self.inception_layer((layer_name + '_inc_down_'), conv, K * 2, 2, padding, self.phase_train)
+            if downsample: conv = self.inception_layer((layer_name + '_inc_down_'), conv, K * 2, 2, padding, self.phase_train)
 
             return conv
 
@@ -96,7 +161,7 @@ class ResNet(SODMatrix):
         :param K: Kernel sizes
         :param S: Stride size
         :param concat_var: The skip connection
-        :param padding: SAME or VALID
+        :param padding: SAME or VALID. In general, use VALID for 3D skip connections
         :param res: Whether to concatenate or add the skip connection
         :return:
         """
@@ -116,8 +181,8 @@ class ResNet(SODMatrix):
             tf.add_to_collection('weights', kernel)
             tf.add_to_collection('biases', bias)
 
-            # Define the output shape
-            out_shape = X.get_shape().as_list()
+            # Define the output shape based on shape of skip connection
+            out_shape = concat_var.get_shape().as_list()
             out_shape[1] *= 2
             out_shape[2] *= 2
             out_shape[3] = K
@@ -225,10 +290,124 @@ class ResNet(SODMatrix):
         else: return conv[-1], conv
 
 
+    def define_network_25D(self, block_layers=[], inception_layers=[], F=3, S_1=1, padding='SAME', downsample_last=False, FPN=True, FPN_layers=64):
+
+        """
+        Shortcut to creating a residual or residual-inception style network with just a few lines of code
+        Additionally, we can create a feature pyramid network at the end
+        Please note, for 2.5 D implementations, the first Conv maintains the same feature map size so make sure to not have too many blocks here!
+        :param input_images: The input images
+        :param block_layers: How many layers in each downsample block. i.e.: [2, 4, 6, ...] for 2 layers, then 4 etc
+        :param inception_layers: which block numbers to make inception layers: [0, 0, 1] makes the third block inception
+        :param F: Filter sizes to use, default to 3
+        :param S_1: Stride of the initial convolution: sometimes we don't want to downsample here
+        :param padding: Padding to use, default ot 'SAME'
+        :param downsample_last: Whether to downsample the last block
+        :param: FPN = Whether to perform a FPN or UNet arm at the end and return the output activation maps
+        :param FPN_layers: How many layers to output in the FPN
+        :return:
+                conv[-1]: the final conv layer
+                conv: the array of outputs from each block: If S1 is 1, keep in mind each index return the result of the block
+                    which is just the downsampled final layer. it RUNs at a higher feature map size
+        """
+
+        # conv holds output of bottleneck layers (no BN/ReLU). Concat holds running lists of skip connections
+        conv = [None] * (self.nb_blocks + 1)
+
+        # Define the first layers before starting the Dense blocks
+        conv[0] = self.convolution_3d('Conv1', self.images, [2, F, F], self.filters, S_1, phase_train=self.phase_train)
+
+        # To save filters for later
+        filter_size_buffer = []
+
+        # Loop through and make the downsample blocks
+        for z in range (self.nb_blocks):
+
+            # Z holds the prior index, X holds the current layer index
+            x = z+1
+
+            # Retreive number of z dimensions here
+            z_dim = conv[z].get_shape().as_list()[1]
+
+            # When down to rank 4, we must be at 2 dimensions [batch, z, y, x, c] --> [batch, y, x, c]
+            if len(conv[z].get_shape().as_list()) == 4: z_dim = 1
+
+            # Set filter size for this block
+            if S_1 == 1: filters = self.filters * (2**z)
+            else: filters = self.filters * (2**x)
+            filter_size_buffer.append(filters)
+
+            if z_dim > 1:
+
+                # Generate the appropriate 3D only downsample if not at the end
+                if inception_layers[z]:
+                    if (not downsample_last) and x == self.nb_blocks: conv[x] = self.inception_block_3d(conv[z], block_layers[z], 'Inc_' + str(x), filters, padding, 0)
+                    else: conv[x] = self.inception_block_3d(conv[z], block_layers[z], 'Inc_' + str(x), filters, padding, 2)
+
+                else:
+                    if (not downsample_last) and x == self.nb_blocks: conv[x] = self.residual_block_3d(conv[z], block_layers[z], 'Res_' + str(x), filters, F, padding, 0, False)
+                    else:  conv[x] = self.residual_block_3d(conv[z], block_layers[z], 'Res_' + str(x), filters, F, padding, 2, False)
+
+            else:
+
+                # Now for the 2D blocks
+                conv[z] = tf.squeeze(conv[z])
+                if inception_layers[z]:
+                    if (not downsample_last) and x==self.nb_blocks: conv[x] = self.inception_block(conv[z], block_layers[z], 'Inc_'+str(x), filters, padding, False)
+                    else: conv[x] = self.inception_block(conv[z], block_layers[z], 'Inc_'+str(x), filters, padding, True)
+
+                else:
+                    if (not downsample_last) and x==self.nb_blocks: conv[x] = self.residual_block(conv[z], block_layers[z], 'Res_'+str(x), filters, F, padding, False, False)
+                    else: conv[x] = self.residual_block(conv[z], block_layers[z], 'Res_'+str(x), filters, F, padding, True, False)
+
+        if FPN:
+            """
+            FPN has two main differences to a Unet decoder:
+            1. We don't decode all the way up to a feature map size equal to the original
+            2. We don't decrease kernel sizes as we upsample
+            """
+
+            # Set first dconv to output of final conv after 1x1 conv. Also save intermediate outputs
+            deconv = [None] * (self.nb_blocks-1)
+            deconv[0] = self.convolution('FPNUp1', conv[-1], 1, FPN_layers, 1, phase_train=self.phase_train)
+
+            # Now loop through and perform the upsamples. Don't go all the way to initial size
+            for z in range(self.nb_blocks-2):
+
+                # Z holds the prior index, X holds the layer index
+                x = z + 1
+
+                # Retreive the shape of the skip connection
+                skip_shape = conv[-(x+2)].get_shape().as_list()[2]
+                skip_z = conv[-(x + 2)].get_shape().as_list()[1]
+
+                # If this is 2D, perform SAME convolutions, else perform VALID
+                if len(conv[z].get_shape().as_list()) == 4: skip_z, padding = 1, 'SAME'
+                else: padding = 'VALID'
+
+                # First 1x1 conv the skip connection
+                if skip_z==1: skip = self.convolution('FPNUp_'+str(x), conv[-(x+2)], 1, FPN_layers, 1, phase_train=self.phase_train)
+                else: skip = self.convolution_3d('Projection_' + str(x), conv[-(x+2)], [skip_z, 1, 1], FPN_layers, 1, 'VALID', self.phase_train, BN=False, relu=False)
+
+                # Perform upsample unless at the end.
+                if x < self.nb_blocks: deconv[x] = self.up_transition('Upsample_' + str(x), deconv[z], 3, FPN_layers, 2, skip, padding=padding, res=True)
+
+                # Finally, perform the 3x3 conv without Relu
+                deconv[x] = self.convolution('FPNOut_' + str(x), deconv[x], 3, FPN_layers, 1, phase_train=self.phase_train, BN=False, relu=False, bias=False)
+
+            # Return the feature pyramid outputs
+            return conv[-1], deconv
+
+        # Return final layer and array of conv block outputs if no FPN
+        else: return conv[-1], conv
+
+
 class ResUNet(ResNet):
 
     """
     Creates UNet style residual networks
+    TODO: Work in progress to convert from DenseNet version
+    Must get rid of transition layer and bottleneck layer
     """
 
     def __init__(self, nb_blocks, filters, sess, phase_train, summary):
@@ -472,7 +651,7 @@ class ResUNet(ResNet):
         return tf.nn.relu(self.batch_normalization(deconv, self.phase_train, 'BNa'))
 
 
-    def define_network_25D(self, layers=[], keep_prob=None, prints=True):
+    def define_network_25D(self, layers=[], keep_prob=None):
 
         # conv holds output of bottleneck layers (no BN/ReLU). Concat holds running lists of skip connections
         conv, concat = [None] * (self.nb_blocks + 1), [None] * (self.nb_blocks - 1)
@@ -521,3 +700,4 @@ class ResUNet(ResNet):
 
         # Return final layer after batch norm and relu
         return tf.nn.relu(self.batch_normalization(deconv, self.phase_train, None))
+
