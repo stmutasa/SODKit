@@ -183,9 +183,7 @@ class ResNet(SODMatrix):
 
             # Define the output shape based on shape of skip connection
             out_shape = concat_var.get_shape().as_list()
-            out_shape[1] *= 2
-            out_shape[2] *= 2
-            out_shape[3] = K
+            out_shape[-1] = K
 
             # Perform the deconvolution. output_shape: A 1-D Tensor representing the output shape of the deconvolution op.
             conv = tf.nn.conv2d_transpose(X, kernel, output_shape=out_shape, strides=[1, S, S, 1], padding=padding)
@@ -378,7 +376,6 @@ class ResNet(SODMatrix):
                 x = z + 1
 
                 # Retreive the shape of the skip connection
-                skip_shape = conv[-(x+2)].get_shape().as_list()[2]
                 skip_z = conv[-(x + 2)].get_shape().as_list()[1]
 
                 # If this is 2D, perform SAME convolutions, else perform VALID
@@ -390,7 +387,7 @@ class ResNet(SODMatrix):
                 else: skip = self.convolution_3d('Projection_' + str(x), conv[-(x+2)], [skip_z, 1, 1], FPN_layers, 1, 'VALID', self.phase_train, BN=False, relu=False)
 
                 # Perform upsample unless at the end.
-                if x < self.nb_blocks: deconv[x] = self.up_transition('Upsample_' + str(x), deconv[z], 3, FPN_layers, 2, skip, padding=padding, res=True)
+                if x < self.nb_blocks: deconv[x] = self.up_transition('Upsample_' + str(x), deconv[z], 3, FPN_layers, 2, tf.squeeze(skip), padding=padding, res=True)
 
                 # Finally, perform the 3x3 conv without Relu
                 deconv[x] = self.convolution('FPNOut_' + str(x), deconv[x], 3, FPN_layers, 1, phase_train=self.phase_train, BN=False, relu=False, bias=False)

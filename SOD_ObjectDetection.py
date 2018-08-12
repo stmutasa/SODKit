@@ -120,14 +120,14 @@ class MRCNN(SODMatrix):
     Feature Pyramid Network Functions
     """
 
-    def Generate_FPN(self, input_images, net_type, input_dims, FPN=True):
+    def Generate_FPN(self, input_images, net_type, input_dims, FPN=1):
 
         """
         Builds the base feature pyramid network
         :param input_images: the input images
         :param net_type: can be a ResNet, DenseNet or Inception net
         :param input_dims: dimensions of the input images
-        :param FPN: Whether to use a feature pyramid network (you should)
+        :param FPN: Whether to use a feature pyramid network (you should). 0 = no, 1 = 2D, 2 = 2.5 D
         :return:
                 The final feature map outputs from the feature pyramid network
         """
@@ -138,6 +138,7 @@ class MRCNN(SODMatrix):
         # Calculate block layers downsampling scheme
         block_sizes = [None] * nb_blocks
         for z in range(nb_blocks): block_sizes[z] = 2 + 2 * z
+        block_sizes[0] = 1
 
         if net_type == 'RESIDUAL':
 
@@ -149,7 +150,8 @@ class MRCNN(SODMatrix):
             inception_layers[-1], inception_layers[-2] = 1, 1
 
             # Define the downsample network and retreive the output of each block #TODO: Fix class inheritence and FPN layers
-            if FPN: _, self.conv = self.resnet.define_network(block_sizes, inception_layers, FPN=True, FPN_layers=self.FPN_layers)
+            if FPN == 1: _, self.conv = self.resnet.define_network(block_sizes, inception_layers, FPN=True, FPN_layers=self.FPN_layers)
+            elif FPN == 2: _, self.conv = self.resnet.define_network_25D(block_sizes, inception_layers, FPN=True, FPN_layers=self.FPN_layers)
             else: _, self.conv = self.resnet.define_network(block_sizes, inception_layers, FPN=False)
 
         if net_type == 'DENSE':
