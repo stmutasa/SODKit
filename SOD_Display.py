@@ -484,6 +484,32 @@ class SOD_Display(SODLoader):
             return np.concatenate(tuple(overlay), axis=2)
 
 
+    def display_vol_label_overlay(self, volume, segments, title, display_non=False, plot=False):
+
+        """
+        Shortcut to find the center of the 3D segments and display an overlay
+        :param volume: Input 3D volume numpy array. any type
+        :param segments: Input 3D segments numpy array any type
+        :param display_non: Whether to display a non overlaid image
+        :param title: what to title the image
+        :param plot: Whether to plot and show the result right away
+        :return:
+        """
+
+        # Find the largest blob of the segments
+        _, cn = self.largest_blob(segments)
+
+        # Convert to float32
+        vol, segs = volume.astype(np.float32), segments.astype(np.float32)
+
+        # Retreive the overlaid image
+        overlay = self.return_image_overlay(vol[cn[0]], segs[cn[0]])
+
+        # Display the images
+        if display_non: self.display_single_image(vol[cn[0]], plot, title=title)
+        self.display_single_image(overlay, plot, title=title)
+
+
     """
          Tool functions: Most of these are hidden
     """
