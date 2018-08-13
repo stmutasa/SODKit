@@ -132,6 +132,8 @@ class MRCNN(SODMatrix):
                 The final feature map outputs from the feature pyramid network
         """
 
+        self.Image_batch = input_images
+
         # Calculate how many blocks are needed to get to a final dimension of 32x32
         nb_blocks = int((input_dims / 32) ** (0.5)) + 1
 
@@ -505,6 +507,7 @@ class MRCNN(SODMatrix):
         """
 
         with tf.name_scope('filter_outside_anchors'):
+
             # Unpack the rank R tensor into multiple rank R-1 tensors along axis
             ymin, xmin, ymax, xmax = tf.unstack(anchors, axis=1)
 
@@ -907,9 +910,9 @@ class MRCNN(SODMatrix):
             minibatch_class_logits = tf.gather(self.FRCNN_class_logits, batch_indices)
             minibatch_sources = tf.gather(self.FRCNN_srcs, batch_indices)
 
-            """
-            TODO: Draw boxes with color here
-            """
+            # TODO: Draw boxes with color here
+            proposal_boxes = self.draw_box_in_img_batch(self.Image_batch, minibatch_reference_boxes, minibatch_sources[:,1])
+            tf.summary.image('/positive_proposals', positive_proposals_in_img)
 
             # Retreive the box deltas
             gtbox_deltas = self._find_deltas(batch_gtboxes, minibatch_reference_boxes)
@@ -1289,13 +1292,26 @@ class MRCNN(SODMatrix):
         # Normalize the boxes
         boxes = tf.cast(boxes, tf.float32)
         img_dims = tf.shape(img_batch)[2]
-        boxes = tf.div(boxes, img_dims)
+        boxes = tf.div(boxes, tf.cast(img_dims, tf.float32))
 
-        # Now add to the batch. Use stack not concat to convert to R+1 tensor
-        box_list = tf.stack([box_batch, boxes], axis=0)
+        # Sort out the box batch
+        # box_batch = tf.transpose(tf.cast(box_batch, tf.float32))
+        # box_list = tf.concat([box_batch, boxes], axis=1)
+        boxes = tf.expand_dims(boxes, 0)
+        boxes[0]
 
-        # Return a copy of the images with the bounding boxes drawn
-        return tf.image.draw_bounding_boxes(img_batch, box_list)
+
+        # # Unstack then stack
+        # a, b, c, d = tf.unstack(boxes, axis=1)
+        #
+        # # Now add to the batch. Use stack not concat to convert to R+1 tensor
+        # box_list = tf.transpose(tf.stack([box_batch, a, b, c, d]))
+
+        # Return a copy of the images with the bounding boxes drawn. Use the middle index if 3D:
+        if len(img_batch.get_shape().as_list()) == 5: boxed_images = tf.image.draw_bounding_boxes(img_batch[:, 2, ::], box_list)
+        else: boxed_images = tf.image.draw_bounding_boxes(img_batch, box_list)
+
+        return boxed_images
 
 
     def draw_colored_box(self, img_batch, boxes, text, box_batch):
