@@ -1298,7 +1298,7 @@ class MRCNN(SODMatrix):
         # box_batch = tf.transpose(tf.cast(box_batch, tf.float32))
         # box_list = tf.concat([box_batch, boxes], axis=1)
         boxes = tf.expand_dims(boxes, 0)
-        boxes[0]
+        boxes[0, :, :]
 
 
         # # Unstack then stack
