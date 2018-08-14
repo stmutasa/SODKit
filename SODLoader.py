@@ -192,7 +192,8 @@ class SODLoader():
         except: photometric = None
 
         # Retreive the dummy accession number
-        accno = int(ndimage.AccessionNumber)
+        try: accno = int(ndimage.AccessionNumber)
+        except: accno = None
 
         # Finally, make the image actually equal to the pixel data and not the header
         image = np.asarray(ndimage.pixel_array, dtype)
@@ -635,17 +636,18 @@ class SODLoader():
         return batch_dict
 
 
-    def save_image(self, image, path, type=None):
+    def save_image(self, image, path, format=None, type=None):
 
         """
         Saves an image to disc
         :param image: Input tensor: can be image, or volume
         :param path: destination file
+        :param format: The format to save in
         :param type: for volumes: either a gif or a volumetric image
         """
 
         # Way more powerful than this but we will go on a PRN basis
-        imageio.imwrite(path, image)
+        imageio.imwrite(path, image, format=format)
 
 
     def RCNN_extract_box_labels(self, mask, dim_3d=False):
