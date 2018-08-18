@@ -266,8 +266,29 @@ class SODLoader():
         except:
             age = None
 
+        # Now retreive the date of the study
+        try: study_date = ndimage.StudyDate
+        except:
+            try: study_date = ndimage.SeriesDate
+            except:
+                try: study_date = ndimage.AcquisitionDate
+                except:
+                    try: study_date = ndimage.ContentDate
+                    except: study_date = None
+
+
+        try: study_time = ndimage.StudyTime
+        except:
+            try: study_time = ndimage.SeriesTime
+            except:
+                try: study_time = ndimage.AcquisitionTime
+                except:
+                    try: study_time = ndimage.ContentTime
+                    except: study_time = None
+
+
         return_dict = { 'dimensions': dims, 'window_level': window, 'photometric': photometric, 'accession': accno, 'sex': sex,
-                        'modality': modality, 'spacing': spacing, 'age': age}
+                        'modality': modality, 'spacing': spacing, 'age': age, 'study_date':study_date, 'study_time': study_time}
 
         return return_dict
 
