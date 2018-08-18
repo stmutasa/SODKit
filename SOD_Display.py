@@ -4,7 +4,7 @@ SOD display is a class containing various methods to display numpy or tensorflow
 
 """
 
-import cv2
+import cv2, imageio
 
 from SODLoader import SODLoader
 
@@ -519,6 +519,20 @@ class SOD_Display(SODLoader):
         # Display the images
         if display_non: self.display_single_image(vol[cn[0]], plot, title=title)
         self.display_single_image(overlay, plot, title=title)
+
+
+    def save_image(self, image, path, format=None, type=None):
+
+        """
+        Saves an image to disc
+        :param image: Input tensor: can be image, or volume
+        :param path: destination file
+        :param format: The format to save in
+        :param type: for volumes: either a gif or a volumetric image
+        """
+
+        # Way more powerful than this but we will go on a PRN basis
+        imageio.imwrite(path, image, format=format)
 
 
     """
