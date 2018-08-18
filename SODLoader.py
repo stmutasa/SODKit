@@ -240,13 +240,34 @@ class SODLoader():
         except:
             photometric = None
 
+        # Retreive Modality
+        try:
+            modality = ndimage.Modality
+        except:
+            modality = None
+
+        # Retreive Spacing
+        try:
+            spacing = ndimage.PixelSpacing
+        except:
+            spacing = None
+
         # Retreive the dummy accession number
-        accno = ndimage.AccessionNumber
+        try: accno = ndimage.AccessionNumber
+        except: accno = None
 
         # Retreive gender
-        sex = ndimage.PatientSex
+        try: sex = ndimage.PatientSex
+        except: sex = None
 
-        return_dict = { 'dimensions': dims, 'window_level': window, 'photometric': photometric, 'accession': accno, 'sex': sex}
+        # Retreive Age
+        try:
+            age = ndimage.PatientAge
+        except:
+            age = None
+
+        return_dict = { 'dimensions': dims, 'window_level': window, 'photometric': photometric, 'accession': accno, 'sex': sex,
+                        'modality': modality, 'spacing': spacing, 'age': age}
 
         return return_dict
 
@@ -1137,7 +1158,9 @@ class SODLoader():
         """
 
         # The image is sent in Z,Y,X format
-        Z, Y, X = image.shape
+        C = None
+        try: Z, Y, X = image.shape
+        except: Z, Y, X, C = image.shape
 
         # OpenCV makes interpolated pixels equal 0. Add the minumum value to subtract it later
         img_min = abs(image.min())

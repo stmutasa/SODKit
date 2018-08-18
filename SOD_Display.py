@@ -144,6 +144,17 @@ class SOD_Display(SODLoader):
 
 
     def display_volume(self, volume, plot=False, cmap='gray'):
+
+        """
+        Displays a scrollable 3D volume slice by slice
+        :param volume: input numpy array or array
+        :param plot: Display now or not
+        :param cmap: color map
+        :return:
+        """
+
+        if type(volume) is not np.ndarray: volume = np.asarray(volume)
+
         #self._remove_keymap_conflicts({'j', 'k'})
         fig, ax = plt.subplots()
         ax.volume = volume
