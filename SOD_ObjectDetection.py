@@ -410,6 +410,8 @@ class MRCNN(SODMatrix):
         # Test: Concat along axis 2
         cll, bll = tf.concat(class_logits, axis=1), tf.concat(box_logits, axis=1)
 
+        self.t1, self.t2, self.t3 = class_logits[0], cll, bll
+
         # Return the concatenated list
         return cll, bll
 
@@ -911,8 +913,8 @@ class MRCNN(SODMatrix):
             minibatch_sources = tf.gather(self.FRCNN_srcs, batch_indices)
 
             # TODO: Draw boxes with color here
-            proposal_boxes = self.draw_box_in_img_batch(self.Image_batch, minibatch_reference_boxes, minibatch_sources[:,1])
-            tf.summary.image('/positive_proposals', positive_proposals_in_img)
+            proposal_images = self.draw_box_in_img_batch(self.Image_batch, minibatch_reference_boxes, minibatch_sources[:, 0])
+            tf.summary.image('/positive_proposals', proposal_images)
 
             # Retreive the box deltas
             gtbox_deltas = self._find_deltas(batch_gtboxes, minibatch_reference_boxes)
@@ -1283,9 +1285,9 @@ class MRCNN(SODMatrix):
 
         """
         Draws a bounding box in the image batch
-        :param img_batch: the images including the batch number
-        :param boxes: input boxes without the batch dimension
-        :param box_batch: The batches index corresponding to each input box
+        :param img_batch: the images including the batch number [batch, z, y, x, c]
+        :param boxes: input boxes without the batch dimension [n, 4]
+        :param box_batch: The batches index corresponding to each input box [n]
         :return:
         """
 
@@ -1294,22 +1296,31 @@ class MRCNN(SODMatrix):
         img_dims = tf.shape(img_batch)[2]
         boxes = tf.div(boxes, tf.cast(img_dims, tf.float32))
 
-        # Sort out the box batch
-        # box_batch = tf.transpose(tf.cast(box_batch, tf.float32))
-        # box_list = tf.concat([box_batch, boxes], axis=1)
-        boxes = tf.expand_dims(boxes, 0)
-        boxes[0, :, :]
+        # Arrange by batches: Get indices per, gather indices, concat together
+        batched_boxes = []
+        for z in range (self.batch_size):
 
+            # Gather the indices for this batch
+            indices = tf.where(tf.equal(z, tf.cast(box_batch, tf.int32)))
+            batch_boxes = tf.reshape(tf.gather(boxes, tf.squeeze(indices)), [-1, 4])
 
-        # # Unstack then stack
-        # a, b, c, d = tf.unstack(boxes, axis=1)
-        #
-        # # Now add to the batch. Use stack not concat to convert to R+1 tensor
-        # box_list = tf.transpose(tf.stack([box_batch, a, b, c, d]))
+            # Expand dims
+            batch_boxes = tf.expand_dims(batch_boxes, 0)
+
+            # Add batch value
+
+            # Append
+            batched_boxes.append(batch_boxes)
+
+        # Concat
+        display_boxes = tf.concat(batched_boxes, axis=0)
+
+        # TODO: Testing
+        #self.t1, self.t2, self.t3 = display_boxes, display_boxes, batch_boxes
 
         # Return a copy of the images with the bounding boxes drawn. Use the middle index if 3D:
-        if len(img_batch.get_shape().as_list()) == 5: boxed_images = tf.image.draw_bounding_boxes(img_batch[:, 2, ::], box_list)
-        else: boxed_images = tf.image.draw_bounding_boxes(img_batch, box_list)
+        if len(img_batch.get_shape().as_list()) == 5: boxed_images = tf.image.draw_bounding_boxes(img_batch[:, 2, ::], display_boxes)
+        else: boxed_images = tf.image.draw_bounding_boxes(img_batch, display_boxes)
 
         return boxed_images
 
