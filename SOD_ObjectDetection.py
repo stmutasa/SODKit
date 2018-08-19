@@ -298,6 +298,10 @@ class MRCNN(SODMatrix):
             valid_scores = tf.gather(rpn_object_score, valid_indices)
             valid_sources = tf.gather(rpn_img_fpn_source, valid_indices)
 
+            # Draw boxes
+            proposal_images = self.draw_box_in_img_batch(self.Image_batch, valid_boxes, valid_sources[:, 0])
+            for z in range(len(proposal_images)): tf.summary.image('/RPN_proposals', proposal_images[z], max_outputs=self.batch_size)
+
             # If not enough boxes are left, pad with zeros
             rpn_proposal_boxes, rpn_proposal_scores, rpn_proposal_sources = tf.cond(tf.less(tf.shape(valid_boxes)[0], self.max_proposals),
                     lambda: self._pad_boxes_zeros(valid_boxes, valid_scores, valid_sources, self.max_proposals),
@@ -360,10 +364,6 @@ class MRCNN(SODMatrix):
             # Multiclass NMS
             FRCNN_nms_boxes = tf.reshape(FRCNN_clipped_boxes, [-1, self.num_classes*4])
             FRCNN_nms_boxes, FRCNN_score, num_objects, detection_category = self._FRCNN_proposals_only()
-
-            # TODO: Testing
-            self.t1, self.t2, self.t3 = FRCNN_softmax_scores
-            return
 
             return FRCNN_nms_boxes, FRCNN_score, num_objects, detection_category
 
@@ -912,9 +912,9 @@ class MRCNN(SODMatrix):
             minibatch_class_logits = tf.gather(self.FRCNN_class_logits, batch_indices)
             minibatch_sources = tf.gather(self.FRCNN_srcs, batch_indices)
 
-            # TODO: Draw boxes with color here
+            # Draw boxes
             proposal_images = self.draw_box_in_img_batch(self.Image_batch, minibatch_reference_boxes, minibatch_sources[:, 0])
-            tf.summary.image('/positive_proposals', proposal_images)
+            for z in range (len(proposal_images)): tf.summary.image('/positive_proposals', proposal_images[z], max_outputs=self.batch_size)
 
             # Retreive the box deltas
             gtbox_deltas = self._find_deltas(batch_gtboxes, minibatch_reference_boxes)
@@ -1297,32 +1297,32 @@ class MRCNN(SODMatrix):
         boxes = tf.div(boxes, tf.cast(img_dims, tf.float32))
 
         # Arrange by batches: Get indices per, gather indices, concat together
-        batched_boxes = []
+        batched_boxes, pad_before = [], 0
         for z in range (self.batch_size):
 
-            # Gather the indices for this batch
+            # Gather the indices of boxes for this batch
             indices = tf.where(tf.equal(z, tf.cast(box_batch, tf.int32)))
             batch_boxes = tf.reshape(tf.gather(boxes, tf.squeeze(indices)), [-1, 4])
 
             # Expand dims
             batch_boxes = tf.expand_dims(batch_boxes, 0)
 
-            # Add batch value
+            # IPad the rest of the batches with zeros
+            pad_after = self.batch_size - (z + 1)
+            paddings = tf.Variable([[pad_before, pad_after], [0, 0], [0,0]], trainable=False)
+            batch_boxes = tf.pad(batch_boxes, paddings)
+
+            # Return a copy of the images with the bounding boxes drawn. Use the middle index if 3D:
+            if len(img_batch.get_shape().as_list()) == 5:
+                boxed_images = tf.image.draw_bounding_boxes(tf.image.grayscale_to_rgb(img_batch[:, 2, ::]), batch_boxes)
+            else:
+                boxed_images = tf.image.draw_bounding_boxes(tf.image.grayscale_to_rgb(img_batch), batch_boxes)
 
             # Append
-            batched_boxes.append(batch_boxes)
+            batched_boxes.append(boxed_images)
+            pad_before +=1
 
-        # Concat
-        display_boxes = tf.concat(batched_boxes, axis=0)
-
-        # TODO: Testing
-        #self.t1, self.t2, self.t3 = display_boxes, display_boxes, batch_boxes
-
-        # Return a copy of the images with the bounding boxes drawn. Use the middle index if 3D:
-        if len(img_batch.get_shape().as_list()) == 5: boxed_images = tf.image.draw_bounding_boxes(img_batch[:, 2, ::], display_boxes)
-        else: boxed_images = tf.image.draw_bounding_boxes(img_batch, display_boxes)
-
-        return boxed_images
+        return batched_boxes
 
 
     def draw_colored_box(self, img_batch, boxes, text, box_batch):

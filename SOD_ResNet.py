@@ -359,6 +359,7 @@ class ResNet(SODMatrix):
                     else: conv[x] = self.residual_block(conv[z], block_layers[z], 'Res_'+str(x), filters, F, padding, True, False)
 
         if FPN:
+
             """
             FPN has two main differences to a Unet decoder:
             1. We don't decode all the way up to a feature map size equal to the original
