@@ -1419,7 +1419,7 @@ class SODMatrix(object):
         labels = tf.one_hot(tf.cast(labels, tf.uint8), depth=num_classes, dtype=tf.uint8)
 
         # Calculate  loss
-        loss = tf.nn.softmax_cross_entropy_with_logits(labels=labels, logits=logits)
+        loss = tf.nn.softmax_cross_entropy_with_logits_v2(labels=labels, logits=logits)
 
         # Reduce to scalar
         loss = tf.reduce_mean(loss)

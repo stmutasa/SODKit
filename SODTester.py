@@ -496,7 +496,7 @@ class SODTester():
         return graph
 
 
-    def calc_softmax(self, X):
+    def calc_softmax_old(self, X):
         """
         Computes the softmax of a given vector
         :param X: numpy array
@@ -510,6 +510,49 @@ class SODTester():
             softmax[z] = np.exp(X[z]) / np.sum(np.exp(X[z]), axis=0)
 
         return softmax
+
+
+    def calc_softmax(self, X, theta=1.0, axis=None):
+        """
+        Compute the softmax of each element along an axis of X.
+
+        Parameters
+        ----------
+        X: ND-Array. Probably should be floats.
+        theta (optional): float parameter, used as a multiplier
+            prior to exponentiation. Default = 1.0
+        axis (optional): axis to compute values along. Default is the
+            first non-singleton axis.
+
+        Returns an array the same size as X. The result will sum to 1
+        along the specified axis.
+        """
+
+        # make X at least 2d
+        y = np.atleast_2d(X)
+
+        # find axis
+        if axis is None: axis = next(j[0] for j in enumerate(y.shape) if j[1] > 1)
+
+        # multiply y against the theta parameter,
+        y = y * float(theta)
+
+        # subtract the max for numerical stability
+        y = y - np.expand_dims(np.max(y, axis=axis), axis)
+
+        # exponentiate y
+        y = np.exp(y)
+
+        # take the sum along the specified axis
+        ax_sum = np.expand_dims(np.sum(y, axis=axis), axis)
+
+        # finally: divide elementwise
+        p = y / ax_sum
+
+        # flatten if X was 1D
+        if len(X.shape) == 1: p = p.flatten()
+
+        return p
 
 
     def calc_metrics_segmentation_no_mask(self, logitz, label_in, display=False, images=None, dice_threshold=0.5, batch_size=32):
@@ -675,12 +718,17 @@ class SODTester():
             # Calculate the new average
             avg = np.asarray(dic['log1']) / dic['total']
 
+            # Calculate the softmax
+            softmax = self.calc_softmax(dic['log1'])
+            for z in range(dic['log1'].shape[0]):  dic[('Class_%s_Probability' %z)] = softmax[z]
+
             # Append to the new arrays
             labba.append(dic['label'])
             logga.append(np.squeeze(avg))
 
             # add to the dictionary
             dic['avg'] = np.squeeze(avg)
+            dic['ID'] = idx
 
         return data, np.squeeze(labba), np.squeeze(logga)
 
