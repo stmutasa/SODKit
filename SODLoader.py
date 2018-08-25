@@ -201,14 +201,18 @@ class SODLoader():
         except:
             try: image = np.asarray(ndimage.pixel_array)
             except:
-                try:
-                    # Try using imageio
+                try: # Try using imageio
                     dirname = os.path.dirname(path)
                     image = imageio.imread(path, 'DICOM')
-                    print ('Loaded with imagio!! ', path)
+                    print ('Loaded DICOM with imagio ', path)
                 except:
-                    print ('Unable to retreive Image Pixel Array: ', path)
-                    return -1
+                    try: # Try using Simple ITK
+                        image = np.squeeze(self._load_DICOM_ITK(path))
+                        image = np.swapaxes(image, -1, 0)
+                        print('Loaded DICOM with ITK ', path)
+                    except:
+                        print ('Unable to retreive Image Pixel Array: ', path)
+                        return -1
 
         # Convert to Houndsfield units if slope and intercept is available:
         try:
@@ -226,6 +230,22 @@ class SODLoader():
         except: pass
 
         return image, accno, dims, window, photometric
+
+
+    def _load_DICOM_ITK(self, path):
+
+        """
+        When all else fails
+        :param path:
+        :return:
+        """
+
+        # Load the image.
+        itkimage = sitk.ReadImage(path)
+        ndimage = sitk.GetArrayFromImage(itkimage)
+
+        return ndimage
+
 
 
     def Retrieve_DICOM_Header(self, path):
@@ -530,6 +550,7 @@ class SODLoader():
 
 
     def load_MHA(self, path):
+
         """
             Loads the .mhd image and stores it into a numpy array
             :param filename: The name of the file
