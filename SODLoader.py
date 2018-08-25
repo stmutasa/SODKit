@@ -177,7 +177,7 @@ class SODLoader():
         try:
             ndimage = dicom.read_file(path)
         except:
-            raise ValueError ('Unable to Load DICOM file: %s' % path)
+            print ('Unable to Load DICOM file: %s' % path)
             return -1
 
         # Retreive the dimensions of the scan
@@ -199,8 +199,16 @@ class SODLoader():
         # Finally, make the image actually equal to the pixel data and not the header
         try: image = np.asarray(ndimage.pixel_array, dtype)
         except:
-            raise ValueError ('Unable to retreive Image Pixel Array: ', path)
-            return -1
+            try: image = np.asarray(ndimage.pixel_array)
+            except:
+                try:
+                    # Try using imageio
+                    dirname = os.path.dirname(path)
+                    image = imageio.imread(path, 'DICOM')
+                    print ('Loaded with imagio!! ', path)
+                except:
+                    print ('Unable to retreive Image Pixel Array: ', path)
+                    return -1
 
         # Convert to Houndsfield units if slope and intercept is available:
         try:
