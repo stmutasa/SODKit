@@ -182,19 +182,19 @@ class SODLoader():
 
         # Retreive the dimensions of the scan
         try: dims = np.array([int(ndimage.Columns), int(ndimage.Rows)])
-        except: dims = None
+        except: dims = 0
 
         # Retreive window level if available
         try: window = [int(ndimage.WindowCenter), int(ndimage.WindowWidth)]
-        except: window = None
+        except: window = 0
 
         # Retreive photometric interpretation (1 = negative XRay) if available
         try: photometric = int(ndimage.PhotometricInterpretation[-1])
         except: photometric = None
 
-        # Retreive the dummy accession number
-        try: accno = int(ndimage.AccessionNumber)
-        except: accno = None
+        # Retreive the accession number
+        try: accno = ndimage.AccessionNumber
+        except: accno = 0
 
         # Finally, make the image actually equal to the pixel data and not the header
         try: image = np.asarray(ndimage.pixel_array, dtype)

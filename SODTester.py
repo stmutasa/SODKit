@@ -703,11 +703,13 @@ class SODTester():
         for z in range(batch_size):
 
             # If we already have the entry then just append
-            if serz[z] in data:
-                data[serz[z]]['log1'] = data[serz[z]]['log1'] + predictions[z]
-                data[serz[z]]['total'] += 1
-            else:
-                data[serz[z]] = {'label': label[z], 'log1': predictions[z], 'total': 1, 'avg': None}
+            try:
+                if serz[z] in data:
+                    data[serz[z]]['log1'] = data[serz[z]]['log1'] + predictions[z]
+                    data[serz[z]]['total'] += 1
+                else:
+                    data[serz[z]] = {'label': label[z], 'log1': predictions[z], 'total': 1, 'avg': None}
+            except: continue
 
         # Initialize new labels and logits
         logga, labba = [], []
