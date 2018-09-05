@@ -514,12 +514,12 @@ class SOD_Display(SODLoader):
 
         elif shape == 'LINE':
 
-            y1, x1, y2, x2 = coordinates
+            x1, y1, x2, y2 = coordinates
             return_image = cv2.line(img, (y1, x1), (y2, x2), color)
 
         else:
 
-            y1, x1, y2, x2 = coordinates
+            x1, y1, x2, y2 = coordinates
             return_image = cv2.rectangle(img, (y1, x1), (y2, x2), color)
 
         return return_image
