@@ -425,6 +425,7 @@ class SOD_Display(SODLoader):
 
 
     def return_image_text_overlay(self, text, image, dim_3d=False, color=1.0, scale=0.5, thickness=1):
+
         """
         This function displays text over an image
         :param text: The text to overlay
@@ -493,6 +494,35 @@ class SOD_Display(SODLoader):
                 layer = np.expand_dims(layer, 2)
                 overlay.append(layer)
             return np.concatenate(tuple(overlay), axis=2)
+
+
+    def return_shape_overlay(self, img, coordinates, color=0.5, shape='BOX'):
+
+        """
+        Draws a shape on the image
+        :param img: Input image
+        :param coordinates: box = (y1, x1, y2, x2), circle = (cy, cx, radius),
+        :param color: Scalar for greyscale, RGB for color
+        :param shape: BOX, RECTANGLE,  CIRCLE, LINE
+        :return:
+        """
+
+        if shape == 'CIRCLE':
+
+            y1, x1, r = coordinates
+            return_image = cv2.rectangle(img, (y1, x1), r, color)
+
+        elif shape == 'LINE':
+
+            y1, x1, y2, x2 = coordinates
+            return_image = cv2.line(img, (y1, x1), (y2, x2), color)
+
+        else:
+
+            y1, x1, y2, x2 = coordinates
+            return_image = cv2.rectangle(img, (y1, x1), (y2, x2), color)
+
+        return return_image
 
 
     def display_vol_label_overlay(self, volume, segments, title, display_non=False, plot=False):
