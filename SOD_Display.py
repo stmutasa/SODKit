@@ -547,7 +547,7 @@ class SOD_Display(SODLoader):
         overlay = self.return_image_overlay(vol[cn[0]], segs[cn[0]])
 
         # Display the images
-        if display_non: self.display_single_image(vol[cn[0]], plot, title=title)
+        if display_non: self.display_single_image(vol[cn[0]], False, title=title)
         self.display_single_image(overlay, plot, title=title)
 
 
