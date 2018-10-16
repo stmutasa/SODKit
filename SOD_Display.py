@@ -525,7 +525,7 @@ class SOD_Display(SODLoader):
         return return_image
 
 
-    def display_vol_label_overlay(self, volume, segments, title, display_non=False, plot=False):
+    def display_vol_label_overlay(self, volume, segments, title, display_non=False, plot=False, dim3D=True):
 
         """
         Shortcut to find the center of the 3D segments and display an overlay
@@ -534,21 +534,36 @@ class SOD_Display(SODLoader):
         :param display_non: Whether to display a non overlaid image
         :param title: what to title the image
         :param plot: Whether to plot and show the result right away
+        :param dim3D: True for volumes, False for 2D images
         :return:
         """
-
-        # Find the largest blob of the segments
-        _, cn = self.largest_blob(segments)
 
         # Convert to float32
         vol, segs = volume.astype(np.float32), segments.astype(np.float32)
 
-        # Retreive the overlaid image
-        overlay = self.return_image_overlay(vol[cn[0]], segs[cn[0]])
+        if dim3D:
 
-        # Display the images
-        if display_non: self.display_single_image(vol[cn[0]], False, title=title)
+            # Find the largest blob of the segments
+            _, cn = self.largest_blob(segments)
+
+            # Retreive the overlaid image
+            overlay = self.return_image_overlay(vol[cn[0]], segs[cn[0]])
+
+            # Display orig
+            if display_non: self.display_single_image(vol[cn[0]], False, title=title)
+
+        else:
+
+            # Retreive the overlaid image
+            overlay = self.return_image_overlay(vol, segs)
+
+            # Display orig
+            if display_non: self.display_single_image(vol, False, title=title)
+
+        # Display the overlay
         self.display_single_image(overlay, plot, title=title)
+
+
 
 
     def save_image(self, image, path, format=None, type=None):
