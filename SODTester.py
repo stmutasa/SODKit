@@ -126,8 +126,9 @@ class SODTester():
             logit = np.expand_dims(logits.astype(np.float), 0)
             logit = np.squeeze(np.argmax(logit, axis=1))
 
-        # First calculate AUC
-        self.AUC += skm.roc_auc_score(label, logit)
+        # First calculate AUC. Error code for when only one class is predicted
+        try: self.AUC += skm.roc_auc_score(label, logit)
+        except: self.AUC += 0.5
         self.calls += 1
 
         # Retreive metrics
