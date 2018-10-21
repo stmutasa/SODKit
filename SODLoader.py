@@ -895,7 +895,7 @@ class SODLoader():
         # Morph Dilate to close in bad segs
 
         # Define the CV2 structuring element
-        radius_close = np.round(mask.shape[1] / 90).astype('int16')
+        radius_close = np.round(mask.shape[1] / 45).astype('int16')
         kernel_close = cv2.getStructuringElement(shape=cv2.MORPH_ELLIPSE, ksize=(radius_close, radius_close))
 
         # Just use morphological closing
