@@ -892,6 +892,15 @@ class SODLoader():
         # Invert mask
         mask = ~mask
 
+        # Morph Dilate to close in bad segs
+
+        # Define the CV2 structuring element
+        radius_close = np.round(mask.shape[1] / 90).astype('int16')
+        kernel_close = cv2.getStructuringElement(shape=cv2.MORPH_ELLIPSE, ksize=(radius_close, radius_close))
+
+        # Just use morphological closing
+        mask = cv2.morphologyEx(mask.astype(np.int16), cv2.MORPH_CLOSE, kernel_close)
+
         return mask
 
 
@@ -1726,6 +1735,55 @@ class SODLoader():
         # Return values or just volume
         if return_values: return image, mean, std, mode
         else: return image
+
+
+    def normalize_Mammo_histogram(self, image, return_values=False, center_type='mean'):
+
+        """
+        Uses histogram normalization to normalize mammography data by removing 0 values
+        :param image: input volume numpy array
+        :param return_values: Whether to return the mean, std and mode values as well
+        :param center_type: What to center the data with, 'mean' or 'mode'
+        :return:
+        """
+
+        # First save a copy of the real image
+        img = np.copy(image)
+
+        # First generate a mammo mask then apply it
+        mask = self.create_mammo_mask(image)
+        image *= mask.astype(image.dtype)
+
+        # First calculate the most commonly occuring values in the volume
+        occurences, values = np.histogram(image, bins=500)
+
+        # Remove 0 values (AIR) which always win
+        occurences, values = occurences[1:], values[1:]
+
+        # The mode is the value array at the index of highest occurence
+        mode = values[np.argmax(occurences)]
+
+        # Make dummy no zero image array to calculate STD
+        dummy, img_temp = [], np.copy(image).flatten()
+        for z in range(len(img_temp)):
+            if img_temp[z] > 5: dummy.append(img_temp[z])
+
+        # Mean/std is calculated from nonzero values only
+        dummy = np.asarray(dummy, np.float32)
+        std, mean = np.std(dummy), np.mean(dummy)
+
+        # Now divide the image by the modified STD
+        if center_type == 'mode':
+            img = img.astype(np.float32) - mode
+        else:
+            img = img.astype(np.float32) - mean
+        img /= std
+
+        # Return values or just volume
+        if return_values:
+            return img, mean, std, mode
+        else:
+            return img
 
 
     def reshape_NHWC(self, vol, NHWC):
