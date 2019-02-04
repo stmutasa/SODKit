@@ -1910,7 +1910,7 @@ class SODLoss(object):
             generalised_dice_numerator / generalised_dice_denominator
         generalised_dice_score = tf.where(tf.is_nan(generalised_dice_score), 1.0,
                                           generalised_dice_score)
-        return 1 - generalised_dice_score
+        return 1- generalised_dice_score
 
 
     def dice_plus_xent_loss(self, prediction, ground_truth, weight_map=None):
@@ -1947,8 +1947,7 @@ class SODLoss(object):
                 tf.sparse_reduce_sum(one_hot * weight_map_nclasses,
                                      reduction_axes=[0])
         else:
-            dice_numerator = 2.0 * tf.sparse_reduce_sum(
-                one_hot * softmax_of_logits, reduction_axes=[0])
+            dice_numerator = 2.0 * tf.sparse_reduce_sum(one_hot * softmax_of_logits, reduction_axes=[0])
             dice_denominator = \
                 tf.reduce_sum(softmax_of_logits, reduction_indices=[0]) + \
                 tf.sparse_reduce_sum(one_hot, reduction_axes=[0])
