@@ -478,7 +478,8 @@ class SODLoader():
             self.save_dict_pickle(pickle_dic, data_root)
 
 
-    def load_tfrecords(self, filenames, box_dims, image_dtype=tf.float32, channels=1, z_dim=None, segments='label_data', segments_dtype=tf.float32):
+    def load_tfrecords(self, filenames, box_dims, image_dtype=tf.float32, channels=1, z_dim=None, segments='label_data',
+                       segments_dtype=tf.float32, segments_channels=1):
 
         """
         Function to load a tfrecord protobuf. numpy arrays (volumes) should have 'data' in them.
@@ -490,6 +491,7 @@ class SODLoader():
         :param z_dim: if 3D, then the dimensions of the z dimension
         :param segments: if labels exist as segments, define the name here if the z-dimension is different from images
         :param segments_dtype: the data type of the segments
+        :param segments_channels: the amount of channels in the segments, usually 1
         :return: data: dictionary with all the loaded tensors
         """
 
@@ -515,12 +517,13 @@ class SODLoader():
 
             # Depending on the type key or entry value, use a different cast function on the feature
             if 'data' in key:
-                if segments in key: data[key] = tf.decode_raw(features[key], segments_dtype)
-                else: data[key] = tf.decode_raw(features[key], image_dtype)
-                if z_dim:
-                    if segments in key: data[key] = tf.reshape(data[key], shape=[box_dims, box_dims, channels])
-                    else: data[key] = tf.reshape(data[key], shape=[z_dim, box_dims, box_dims, channels])
-                else: data[key] = tf.reshape(data[key], shape=[box_dims, box_dims, channels])
+                if segments in key:
+                    data[key] = tf.decode_raw(features[key], segments_dtype)
+                    data[key] = tf.reshape(data[key], shape=[box_dims, box_dims, segments_channels])
+                else:
+                    data[key] = tf.decode_raw(features[key], image_dtype)
+                    if z_dim: data[key] = tf.reshape(data[key], shape=[z_dim, box_dims, box_dims, channels])
+                    else: data[key] = tf.reshape(data[key], shape=[box_dims, box_dims, channels])
                 data[key] = tf.cast(data[key], tf.float32)
 
             elif 'str' in value: data[key] = tf.cast(features[key], tf.string)
