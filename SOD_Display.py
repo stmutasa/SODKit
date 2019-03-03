@@ -64,6 +64,8 @@ class SOD_Display(SODLoader):
         :return: fig: the figure handle
         """
 
+        if type(vol) is not np.ndarray: vol = np.asarray(vol)
+
         if vmin is None:
             vmin = np.nanmin(vol)
         if vmax is None:
@@ -109,12 +111,10 @@ class SOD_Display(SODLoader):
             ax = fig.axes[0]
 
         if mode == 'standard':
-            imax = ax.matshow(im.T, vmin=vmin, vmax=vmax, **kwargs)
+            imax = ax.matshow(im.T, vmin=vmin, vmax=vmax, cmap='gray', **kwargs)
         else:
             imax = plt.imshow(np.rot90(im), interpolation='nearest')
             cbar = False
-        ax.get_axes().get_xaxis().set_visible(False)
-        ax.get_axes().get_yaxis().set_visible(False)
         returns = [fig]
         if cbar:
             # The colorbar will refer to the last thing plotted in this figure
@@ -174,6 +174,9 @@ class SOD_Display(SODLoader):
         :param show_every:
         :return:
         """
+
+        if type(stack) is not np.ndarray: stack = np.asarray(stack)
+
         fig, ax = plt.subplots(rows, cols, figsize=[12, 12])
         for i in range(rows * cols):
             ind = start_with + i * show_every
@@ -200,6 +203,8 @@ class SOD_Display(SODLoader):
         :param color: Color
         :return:
         """
+
+        if type(input_image) is not np.ndarray: input_image = np.asarray(input_image)
 
         # Create figure and a subplot
         fig, ax = plt.subplots()

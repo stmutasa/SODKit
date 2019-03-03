@@ -812,6 +812,56 @@ class SODLoader():
             return boxes.astype(np.int32)
 
 
+    def resize_3D_by_axis(self, image, dim_1, dim_2, axis_to_hold, is_grayscale):
+
+        """
+        Resizes a 3D volume in tensorflow by axis.
+        :param image:
+        :param dim_1:
+        :param dim_2:
+        :param ax:
+        :param is_grayscale:
+        :return:
+        """
+
+        ax = axis_to_hold
+
+        resized_list = []
+
+        if is_grayscale:
+            unstack_img_depth_list = [tf.expand_dims(x, 2) for x in tf.unstack(image, axis=ax)]
+            for i in unstack_img_depth_list:
+                resized_list.append(tf.image.resize_images(i, [dim_1, dim_2], method=0))
+            stack_img = tf.squeeze(tf.stack(resized_list, axis=ax))
+            print(stack_img.get_shape())
+
+        else:
+            unstack_img_depth_list = tf.unstack(image, axis=ax)
+            for i in unstack_img_depth_list:
+                resized_list.append(tf.image.resize_images(i, [dim_1, dim_2], method=0))
+            stack_img = tf.stack(resized_list, axis=ax)
+
+        return stack_img
+
+
+    def tf_resize_3D(self, image, z_dim, x_dim, y_dim, is_grayscale):
+
+        """
+        To resize a 3D tensorflor tensor
+        :param image:
+        :param z_dim:
+        :param x_dim:
+        :param y_dim:
+        :param is_grayscale:
+        :return:
+        """
+
+        resized_along_depth = self.resize_by_axis(image, y_dim, z_dim, 2, is_grayscale)
+        resized_along_width = self.resize_by_axis(resized_along_depth, y_dim, x_dim, 1, is_grayscale)
+
+        return resized_along_width
+
+
     """
              Pre processing functions.
     """
