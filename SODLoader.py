@@ -75,8 +75,9 @@ class SODLoader():
         """
 
         # Some DICOMs end in .dcm, others do not
-        if path[-3:] != 'dcm': fnames = [path + '/' + s for s in os.listdir(path) if s[-3:].lower() == 'dcm']
-        else: fnames = [path]
+        # if path[-3:] != 'dcm': fnames = [path + '/' + s for s in os.listdir(path) if s[-3:].lower() == 'dcm']
+        # else: fnames = [path]
+        fnames = self.retreive_filelist('**', True, path)
 
         # Sort the slices
         ndimage = [dicom.read_file(path, force=True) for path in fnames]

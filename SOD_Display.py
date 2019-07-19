@@ -208,7 +208,7 @@ class SOD_Display(SODLoader):
         if boxes.ndim==1:
 
             # Retreive coordinates and a random color
-            ymin, xmin, ymax, xmax = boxes[0], boxes[1], boxes[2], boxes[3]
+            xmin, ymin, xmax, ymax = boxes[0], boxes[1], boxes[0] + boxes[2], boxes[1] + boxes[3]
             color = (np.random.randint(255), np.random.randint(255), np.random.randint(255))
 
             # Generate a rectangle
@@ -217,7 +217,7 @@ class SOD_Display(SODLoader):
         else:
             for box in boxes:
                 # Retreive coordinates and a random color
-                ymin, xmin, ymax, xmax = box[0], box[1], box[2], box[3]
+                xmin, ymin, xmax, ymax = box[0], box[1], box[0] + box[2], box[1] + box[3]
                 color = (np.random.randint(255), np.random.randint(255), np.random.randint(255))
 
                 # Generate a rectangle
