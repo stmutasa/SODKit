@@ -22,7 +22,6 @@ import pandas as pd
 from scipy.io import loadmat
 from skimage import morphology
 import imageio
-import medpy
 
 
 class SODLoader():
@@ -1215,7 +1214,7 @@ class SODLoader():
         return image, new_spacing
 
 
-    def resize_volume(self, image, dtype, x=256, y=256, z=None):
+    def resize_volume(self, image, dtype, x=256, y=256, z=None, c=None):
 
         """
         Resize a volume to the new size
@@ -1224,15 +1223,20 @@ class SODLoader():
         :param x: new x dimensino
         :param y:
         :param z: new z dimension
+        :param c: new c dimension
         :return:
         """
 
         # Resize the array
         if not z: z=image.shape[0]
-        resize = np.zeros((z, x, y), dtype)
 
-        # Slice by slice zoom
-        for idx in range(image.shape[0]): resize[idx] = self.zoom_2D(image[idx], [x, y])
+        if not c:
+            resize = np.zeros((z, x, y), dtype)
+            for idx in range(image.shape[0]): resize[idx] = self.zoom_2D(image[idx], [x, y])
+
+        else:
+            resize = np.zeros((z, x, y, c), dtype)
+            for idx in range(image.shape[0]): resize[idx] = self.zoom_2D(image[idx], [x, y])
 
         # Return
         return resize
@@ -1247,11 +1251,12 @@ class SODLoader():
         """
 
         # Define the resize matrix
-        resize_factor = [factor[0] * volume.shape[0], factor[1] * volume.shape[1],
-                         factor[2] * volume.shape[2]]
+        resize_factor = [factor[0] * volume.shape[0], factor[1] * volume.shape[1], factor[2] * volume.shape[2]]
+        resize_factor_depth = [factor[0] * volume.shape[0], factor[1] * volume.shape[1], factor[2] * volume.shape[2], 1]
 
         # Perform the zoom
-        return scipy.interpolation.zoom(volume, resize_factor, mode='nearest')
+        try: return scipy.interpolation.zoom(volume, resize_factor, mode='nearest')
+        except: return scipy.interpolation.zoom(volume, resize_factor_depth, mode='nearest')
 
 
     def zoom_2D(self, image, new_shape):
