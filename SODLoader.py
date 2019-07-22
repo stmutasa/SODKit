@@ -1875,26 +1875,14 @@ class SODLoader():
         return vol
 
 
-    def gray2rgb(self, img, maximum_val=1, percentile=0):
-        """
-        Method to convert H x W grayscale tensor to H x W x 3 RGB grayscale
-        :params
-        (np.array) img : input H x W tensor
-        (int) maximum_val : maximum value in output
-          if maximum_val == 1, output is assumed to be float32
-          if maximum_val == 255, output is assumed to be uint8 (standard 256 x 256 x 256 RGB image)
-        (int) percentile : lower bound to set to 0
-        """
-        img_min, img_max = np.percentile(img, percentile), np.percentile(img, 100 - percentile)
-        img = (img - img_min) / (img_max - img_min)
-        img[img > 1] = 1
-        img[img < 0] = 0
-        img = img * maximum_val
-        img = np.expand_dims(img, 2)
-        img = np.tile(img, [1, 1, 3])
+    def gray2rgb(self, img):
 
-        dtype = 'float32' if maximum_val == 1 else 'uint8'
-        return img.astype(dtype)
+        """
+        Use open CV to convert HxW grayscale image to HxWxC RGB image
+        :param img: The input image as numpy array
+        :return: the converted image
+        """
+        return cv2.cvtColor(img,cv2.COLOR_GRAY2RGB)
 
 
     def random_3daffine(self, angle=45):
