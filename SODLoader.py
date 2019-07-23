@@ -479,7 +479,7 @@ class SODLoader():
 
 
     def load_tfrecords(self, filenames, box_dims, image_dtype=tf.float32, channels=1, z_dim=None, segments='label_data',
-                       segments_dtype=tf.float32, segments_channels=1):
+                       segments_dtype=tf.float32, segments_shape = []):
 
         """
         Function to load a tfrecord protobuf. numpy arrays (volumes) should have 'data' in them.
@@ -491,7 +491,7 @@ class SODLoader():
         :param z_dim: if 3D, then the dimensions of the z dimension
         :param segments: if labels exist as segments, define the name here if the z-dimension is different from images
         :param segments_dtype: the data type of the segments
-        :param segments_channels: the amount of channels in the segments, usually 1
+        :param segments_shape: Shape of segments, i.e. ZxYxXxC or YxXxC
         :return: data: dictionary with all the loaded tensors
         """
 
@@ -511,19 +511,23 @@ class SODLoader():
         # Parses one protocol buffer file into the features dictionary which maps keys to tensors with the data: 'key': parse_single_eg
         features = tf.parse_single_example(serialized_example, features=feature_dict)
 
+        # Convert box dims to tuple
+        if isinstance(box_dims, int): box_dims = [box_dims, box_dims]
+
         # Make a data dictionary and cast it to floats
         data = {'id': tf.cast(features['id'], tf.float32)}
         for key, value in loaded_dict.items():
 
             # Depending on the type key or entry value, use a different cast function on the feature
-            if 'data' in key:
-                if segments in key:
-                    data[key] = tf.decode_raw(features[key], segments_dtype)
-                    data[key] = tf.reshape(data[key], shape=[box_dims, box_dims, segments_channels])
-                else:
-                    data[key] = tf.decode_raw(features[key], image_dtype)
-                    if z_dim: data[key] = tf.reshape(data[key], shape=[z_dim, box_dims, box_dims, channels])
-                    else: data[key] = tf.reshape(data[key], shape=[box_dims, box_dims, channels])
+            if 'data' in key and segments not in key:
+                data[key] = tf.decode_raw(features[key], image_dtype)
+                if z_dim: data[key] = tf.reshape(data[key], shape=[z_dim, box_dims[0], box_dims[1], channels])
+                else: data[key] = tf.reshape(data[key], shape=[box_dims[0], box_dims[1], channels])
+                data[key] = tf.cast(data[key], tf.float32)
+
+            if segments in key:
+                data[key] = tf.decode_raw(features[key], segments_dtype)
+                data[key] = tf.reshape(data[key], shape=segments_shape)
                 data[key] = tf.cast(data[key], tf.float32)
 
             elif 'str' in value: data[key] = tf.cast(features[key], tf.string)
