@@ -478,14 +478,14 @@ class SODLoader():
             self.save_dict_pickle(pickle_dic, data_root)
 
 
-    def load_tfrecords(self, filenames, box_dims, image_dtype=tf.float32, channels=1, z_dim=None, segments='label_data',
+    def load_tfrecords(self, filenames, data_dims=[], image_dtype=tf.float32,  segments='label_data',
                        segments_dtype=tf.float32, segments_shape = []):
 
         """
         Function to load a tfrecord protobuf. numpy arrays (volumes) should have 'data' in them.
         Currently supports strings, floats, ints, and arrays
         :param filenames: the list of filenames for the filename queue
-        :param box_dims: the dimensions of the image saved
+        :param data: the dimensions of the image saved, i.e. ZxYxXxC or YxXxC
         :param image_dtype: the data type of the image. i.e. tf.float32
         :param channels: how many channels in the image data
         :param z_dim: if 3D, then the dimensions of the z dimension
@@ -511,9 +511,6 @@ class SODLoader():
         # Parses one protocol buffer file into the features dictionary which maps keys to tensors with the data: 'key': parse_single_eg
         features = tf.parse_single_example(serialized_example, features=feature_dict)
 
-        # Convert box dims to tuple
-        if isinstance(box_dims, int): box_dims = [box_dims, box_dims]
-
         # Make a data dictionary and cast it to floats
         data = {'id': tf.cast(features['id'], tf.float32)}
         for key, value in loaded_dict.items():
@@ -521,8 +518,7 @@ class SODLoader():
             # Depending on the type key or entry value, use a different cast function on the feature
             if 'data' in key and segments not in key:
                 data[key] = tf.decode_raw(features[key], image_dtype)
-                if z_dim: data[key] = tf.reshape(data[key], shape=[z_dim, box_dims[0], box_dims[1], channels])
-                else: data[key] = tf.reshape(data[key], shape=[box_dims[0], box_dims[1], channels])
+                data[key] = tf.reshape(data[key], shape=data_dims)
                 data[key] = tf.cast(data[key], tf.float32)
 
             if segments in key:
@@ -530,10 +526,62 @@ class SODLoader():
                 data[key] = tf.reshape(data[key], shape=segments_shape)
                 data[key] = tf.cast(data[key], tf.float32)
 
+            if 'bbox' in key:
+                data[key] = tf.decode_raw(features[key], tf.float32)
+                data[key] = tf.reshape(data[key], shape=[-1, 5])
+                data[key] = tf.cast(data[key], tf.float32)
+
             elif 'str' in value: data[key] = tf.cast(features[key], tf.string)
             else: data[key] = tf.string_to_number(features[key], tf.float32)
 
         return data
+
+
+    def load_tfrecords_dataset(self, filenames):
+
+
+        # now load the remaining files
+        filename_queue = tf.train.string_input_producer(filenames, num_epochs=None)
+
+        reader = tf.TFRecordReader()  # Instantializes a TFRecordReader which outputs records from a TFRecords file
+        _, serialized_example = reader.read(filename_queue)  # Returns the next record (key:value) produced by the reader
+
+        # Pickle load
+        loaded_dict = self.load_dict_pickle()
+
+        # Populate the feature dict
+        feature_dict = {'id': tf.FixedLenFeature([], tf.int64)}
+        for key, value in loaded_dict.items(): feature_dict[key] = tf.FixedLenFeature([], tf.string)
+
+        # Parses one protocol buffer file into the features dictionary which maps keys to tensors with the data: 'key': parse_single_eg
+        features = tf.parse_single_example(serialized_example, features=feature_dict)
+
+        return features
+
+        # # Make a data dictionary and cast it to floats
+        # data = {'id': tf.cast(features['id'], tf.float32)}
+        # for key, value in loaded_dict.items():
+        #
+        #     # Depending on the type key or entry value, use a different cast function on the feature
+        #     if 'data' in key and segments not in key:
+        #         data[key] = tf.decode_raw(features[key], image_dtype)
+        #         data[key] = tf.reshape(data[key], shape=data_dims)
+        #         data[key] = tf.cast(data[key], tf.float32)
+        #
+        #     if segments in key:
+        #         data[key] = tf.decode_raw(features[key], segments_dtype)
+        #         data[key] = tf.reshape(data[key], shape=segments_shape)
+        #         data[key] = tf.cast(data[key], tf.float32)
+        #
+        #     if 'bbox' in key:
+        #         data[key] = tf.decode_raw(features[key], tf.float32)
+        #         data[key] = tf.reshape(data[key], shape=[-1, 5])
+        #         data[key] = tf.cast(data[key], tf.float32)
+        #
+        #     elif 'str' in value: data[key] = tf.cast(features[key], tf.string)
+        #     else: data[key] = tf.string_to_number(features[key], tf.float32)
+        #
+        # return data
 
 
     def load_NIFTY(self, path, reshape=True):
@@ -670,7 +718,7 @@ class SODLoader():
         return pt, study, ln
 
 
-    def randomize_batches(self, image_dict, batch_size):
+    def randomize_batches(self, image_dict, batch_size, dynamic=False):
         """
         This function takes our full data tensors and creates shuffled batches of data.
         :param image_dict: the dictionary of tensors with the images and labels
@@ -683,8 +731,8 @@ class SODLoader():
         keys, tensors = zip(*image_dict.items())  # Create zip object
 
         # This function creates batches by randomly shuffling the input tensors. returns a dict of shuffled tensors
-        shuffled = tf.train.shuffle_batch(tensors, batch_size=batch_size,
-                                          capacity=capacity, min_after_dequeue=min_dq)
+        if dynamic: shuffled = tf.train.batch(tensors, batch_size=batch_size, capacity=capacity, dynamic_pad=True)
+        else: shuffled = tf.train.shuffle_batch(tensors, batch_size=batch_size, capacity=capacity, min_after_dequeue=min_dq)
 
         # Dictionary to store our shuffled examples
         batch_dict = {}
@@ -2009,7 +2057,7 @@ class SODLoader():
     def save_tfrecords(self, data, xvals, test_size=50, file_root='data/Data'):
 
         """
-        Saves the dictionary given to a protocol buffer in tfrecords format
+        Saves the dictionary given to a protocol buffer in tfecords format
         :param data: Input dictionary
         :param xvals: number of even files to save. If ==2 save 'test_size' test set and a train set
         :param test_size: if xvals == 2 then this is the number of examples to put in the test set
@@ -2025,6 +2073,7 @@ class SODLoader():
 
             # Loop through each example and append the protobuf with the specified features
             for key, values in data.items():
+
                 # Serialize to string
                 example = tf.train.Example(features=tf.train.Features(feature=self.create_feature_dict(values, key)))
 
