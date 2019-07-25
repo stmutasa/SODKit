@@ -62,7 +62,7 @@ class SODLoader():
         """
         This function loads a DICOM folder and stores it into a numpy array. From Kaggle
         :param: path: The path of the DICOM folder
-        :param sort: Whether to sort through messy folders for the actual axial acquisition
+        :param sort: Whether to sort through messy folders for the actual axial acquisition. False, 'Lung' or 'PE'
         :param: overwrite_dims = In case slice dimensions can't be retreived, define overwrite dimensions here
         :param: dtype = what data type to save the image as
         :param: display = Whether to display debug text
@@ -81,7 +81,9 @@ class SODLoader():
 
         # Sort the slices
         ndimage = [dicom.read_file(path, force=True) for path in fnames]
-        if sort: ndimage = self.sort_DICOMS(ndimage, display, path)
+        if sort:
+            if 'Lung' in sort: ndimage = self.sort_DICOMS_Lung(ndimage, display, path)
+            elif 'PE' in sort: ndimage = self.sort_DICOMS_PE(ndimage, display, path)
         ndimage, fnames, orientation, st, shape, four_d = self.sort_dcm(ndimage, fnames)
         ndimage.sort(key=lambda x: int(x.ImagePositionPatient[2]))
 
@@ -478,28 +480,20 @@ class SODLoader():
             self.save_dict_pickle(pickle_dic, data_root)
 
 
-    def load_tfrecords(self, filenames, data_dims=[], image_dtype=tf.float32,  segments='label_data',
+    def load_tfrecords(self, dataset, data_dims=[], image_dtype=tf.float32, segments='label_data',
                        segments_dtype=tf.float32, segments_shape = []):
 
         """
         Function to load a tfrecord protobuf. numpy arrays (volumes) should have 'data' in them.
         Currently supports strings, floats, ints, and arrays
-        :param filenames: the list of filenames for the filename queue
-        :param data: the dimensions of the image saved, i.e. ZxYxXxC or YxXxC
+        :param dataset: the tf.dataset object
+        :param data_dims: the dimensions of the image saved, i.e. ZxYxXxC or YxXxC
         :param image_dtype: the data type of the image. i.e. tf.float32
-        :param channels: how many channels in the image data
-        :param z_dim: if 3D, then the dimensions of the z dimension
         :param segments: if labels exist as segments, define the name here if the z-dimension is different from images
         :param segments_dtype: the data type of the segments
         :param segments_shape: Shape of segments, i.e. ZxYxXxC or YxXxC
         :return: data: dictionary with all the loaded tensors
         """
-
-        # now load the remaining files
-        filename_queue = tf.train.string_input_producer(filenames, num_epochs=None)
-
-        reader = tf.TFRecordReader()  # Instantializes a TFRecordReader which outputs records from a TFRecords file
-        _, serialized_example = reader.read(filename_queue)  # Returns the next record (key:value) produced by the reader
 
         # Pickle load
         loaded_dict = self.load_dict_pickle()
@@ -509,27 +503,27 @@ class SODLoader():
         for key, value in loaded_dict.items(): feature_dict[key] = tf.FixedLenFeature([], tf.string)
 
         # Parses one protocol buffer file into the features dictionary which maps keys to tensors with the data: 'key': parse_single_eg
-        features = tf.parse_single_example(serialized_example, features=feature_dict)
+        features = tf.parse_single_example(dataset, features=feature_dict)
 
         # Make a data dictionary and cast it to floats
         data = {'id': tf.cast(features['id'], tf.float32)}
         for key, value in loaded_dict.items():
 
             # Depending on the type key or entry value, use a different cast function on the feature
-            if 'data' in key and segments not in key:
-                data[key] = tf.decode_raw(features[key], image_dtype)
-                data[key] = tf.reshape(data[key], shape=data_dims)
-                data[key] = tf.cast(data[key], tf.float32)
-
-            if segments in key:
-                data[key] = tf.decode_raw(features[key], segments_dtype)
-                data[key] = tf.reshape(data[key], shape=segments_shape)
-                data[key] = tf.cast(data[key], tf.float32)
-
             if 'bbox' in key:
                 data[key] = tf.decode_raw(features[key], tf.float32)
                 data[key] = tf.reshape(data[key], shape=[-1, 5])
-                data[key] = tf.cast(data[key], tf.float32)
+                #data[key] = tf.cast(data[key], tf.float32)
+
+            elif segments in key:
+                data[key] = tf.decode_raw(features[key], segments_dtype)
+                data[key] = tf.reshape(data[key], shape=segments_shape)
+                #data[key] = tf.cast(data[key], tf.float32)
+
+            elif 'data' in key:
+                data[key] = tf.decode_raw(features[key], image_dtype)
+                data[key] = tf.reshape(data[key], shape=data_dims)
+                #data[key] = tf.cast(data[key], tf.float32)
 
             elif 'str' in value: data[key] = tf.cast(features[key], tf.string)
             else: data[key] = tf.string_to_number(features[key], tf.float32)
@@ -2273,7 +2267,7 @@ class SODLoader():
         print('Mean %s, Std: %s' % ((mean / num), (std / num)))
 
 
-    def sort_DICOMS(self, ndimage, display=False, path=None):
+    def sort_DICOMS_PE(self, ndimage, display=False, path=None):
 
         """
         Sorts through messy DICOM folders and retreives axial original acquisitions of PE studies
@@ -2287,6 +2281,112 @@ class SODLoader():
         desired_ImageTypes = ['PRIMARY', 'AXIAL', 'ORIGINAL']
         skipped_ImageTypes = ['MIP', 'SECONDARY', 'LOCALIZER', 'REFORMATTED']
         skipped_Descriptions = ['BONE', 'LUNG', 'WITHOUT', 'TRACKER', 'SMART PREP', 'MONITORING', 'LOCATOR']
+        skipped_Studies = ['ABDOMEN', 'PELVIS']
+
+        # Try saving only the original primary axial series. Use an ID to make sure to save only one series. Skip MIPS
+        real, this_ID, this_series, test_ID = [], None, None, None
+        for z in range(len(ndimage)):
+
+            # Try statement to skip non DICOM slices
+            try:
+
+                # Skip the things we want to skip
+                if ('ORIGINAL' not in ndimage[z].ImageType) or ('PRIMARY' not in ndimage[z].ImageType) or ('AXIAL' not in ndimage[z].ImageType): continue
+                if any(text in ndimage[z].ImageType for text in skipped_ImageTypes): continue
+                if any(text in ndimage[z].SeriesDescription.upper() for text in skipped_Descriptions): continue
+                if any(text in ndimage[z].StudyDescription.upper() for text in skipped_Studies): continue
+                if len(ndimage[z].SeriesDescription) == 0: continue
+
+                # Make Sure identification matches or is null then add to the volume
+                if (this_ID == None or this_ID == ndimage[z].ImageType) and (this_series == None or this_series == ndimage[z].SeriesDescription):
+                    this_ID = ndimage[z].ImageType
+                    this_series = ndimage[z].SeriesDescription
+                    real.append(ndimage[z])
+                    if not test_ID:
+                        if display: print ('Win on try 1: ', this_series, end = '')
+                        test_ID = True
+
+            except: continue
+
+        # No original series must exist if this following try statement fails, load a derived primary axial instead
+        try: print (real[0].ImageType, end='')
+        except:
+
+            # Save only the original axial, use ID to save one series only
+            del real
+            real, this_ID, this_series, test_ID = [], None, None, None
+            if display: print ('First attempt to load DICOM failed, trying with less strict requirements')
+            for z in range(len(ndimage)):
+
+                # Try statement to skip non DICOM slices
+                try:
+
+                    # Less strict on image type
+                    if ('PRIMARY' not in ndimage[z].ImageType) or ('AXIAL' not in ndimage[z].ImageType): continue
+                    if any(text in ndimage[z].ImageType for text in skipped_ImageTypes): continue
+                    if any(text in ndimage[z].SeriesDescription.upper() for text in skipped_Descriptions): continue
+                    if any(text in ndimage[z].StudyDescription.upper() for text in skipped_Studies): continue
+                    if len(ndimage[z].SeriesDescription) == 0: continue
+
+                    # Make Sure identification matches or is null then add to the volume
+                    if (this_ID == None or this_ID == ndimage[z].ImageType) and (this_series == None or this_series == ndimage[z].SeriesDescription):
+                        this_ID = ndimage[z].ImageType
+                        this_series = ndimage[z].SeriesDescription
+                        real.append(ndimage[z])
+                        if not test_ID:
+                            if display: print('Win on try 2: ', this_series, end='')
+                            test_ID = True
+
+                except: continue
+
+        # At this point, we're up shit's creek
+        try: print (real[0].ImageType)
+        except:
+
+            # Save only the original axial, use ID to save one series only
+            del real
+            real, this_ID, this_series, test_ID = [], None, None, None
+            skipped_Descriptions_shit = ['BONE', 'WITHOUT', 'TRACKER', 'SMART PREP', 'MONITORING']
+            if display: print('2nd attempt failed... up shits creek now...')
+            for z in range(len(ndimage)):
+
+                # Try statement to skip non DICOM slices
+                try:
+
+                    # Skip less image types, load lung windows if available, don't skip empty descriptions
+                    if ('ORIGINAL' not in ndimage[z].ImageType) or ('PRIMARY' not in ndimage[z].ImageType) or ('AXIAL' not in ndimage[z].ImageType): continue
+                    if any(text in ndimage[z].ImageType for text in skipped_ImageTypes): continue
+                    if any(text in ndimage[z].SeriesDescription.upper() for text in skipped_Descriptions_shit): continue
+                    if any(text in ndimage[z].StudyDescription for text in skipped_Studies): continue
+
+                    # Make Sure identification matches or is null then add to the volume
+                    if (this_ID == None or this_ID == ndimage[z].ImageType) and (this_series == None or this_series == ndimage[z].SeriesDescription):
+                        this_ID = ndimage[z].ImageType
+                        this_series = ndimage[z].SeriesDescription
+                        real.append(ndimage[z])
+                        if not test_ID:
+                            if display: print('Win on try 3: ', this_series, end='')
+                            test_ID = True
+
+                except: continue
+
+        return real
+
+
+    def sort_DICOMS_Lung(self, ndimage, display=False, path=None):
+
+        """
+        Sorts through messy DICOM folders and retreives axial original acquisitions of lung CT scans
+        :param ndimage: The loaded DICOM volume
+        :param display: Whether to display debugging text
+        :param path: Path to the original folder, for debug text
+        :return: real: the desired actual images
+        """
+
+        # First define some values in the DICOM header that indicate files we want to skip
+        desired_ImageTypes = ['PRIMARY', 'AXIAL', 'ORIGINAL']
+        skipped_ImageTypes = ['MIP', 'SECONDARY', 'LOCALIZER', 'REFORMATTED']
+        skipped_Descriptions = ['BONE', 'LUNG', 'WITH', 'TRACKER', 'SMART PREP', 'MONITORING', 'LOCATOR']
         skipped_Studies = ['ABDOMEN', 'PELVIS']
 
         # Try saving only the original primary axial series. Use an ID to make sure to save only one series. Skip MIPS
