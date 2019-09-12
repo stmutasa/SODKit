@@ -2383,14 +2383,26 @@ class SODLoader():
         :return: real: the desired actual images
         """
 
+        """
+        We want SERIES Description Axial lung thin
+        Then bone, thin slice
+        Then any thin slice < 1
+        Then any thin slice < 2
+        Skip derived secondary reformatted
+        """
+
+        # Things we want
+        desired_Description = ['AXIAL', 'LUNG', 'THIN']
+
         # First define some values in the DICOM header that indicate files we want to skip
-        desired_ImageTypes = ['PRIMARY', 'AXIAL', 'ORIGINAL']
-        skipped_ImageTypes = ['MIP', 'SECONDARY', 'LOCALIZER', 'REFORMATTED']
-        skipped_Descriptions = ['BONE', 'LUNG', 'WITH', 'TRACKER', 'SMART PREP', 'MONITORING', 'LOCATOR']
+        skipped_ImageTypes = ['MIP', 'SECONDARY', 'LOCALIZER', 'REFORMATTED', 'DERIVED']
+        skipped_Descriptions = ['WITH', 'TRACKER', 'SMART PREP', 'MONITORING', 'LOCATOR']
         skipped_Studies = ['ABDOMEN', 'PELVIS']
 
-        # Try saving only the original primary axial series. Use an ID to make sure to save only one series. Skip MIPS
+        # Placeholders
         real, this_ID, this_series, test_ID = [], None, None, None
+
+        # First try finding our ideal study, axial lung thin
         for z in range(len(ndimage)):
 
             # Try statement to skip non DICOM slices
@@ -2398,37 +2410,43 @@ class SODLoader():
 
                 # Skip the things we want to skip
                 if ('ORIGINAL' not in ndimage[z].ImageType) or ('PRIMARY' not in ndimage[z].ImageType) or ('AXIAL' not in ndimage[z].ImageType): continue
+                if any(text not in ndimage[z].SeriesDescription.upper() for text in desired_Description): continue
+
                 if any(text in ndimage[z].ImageType for text in skipped_ImageTypes): continue
                 if any(text in ndimage[z].SeriesDescription.upper() for text in skipped_Descriptions): continue
                 if any(text in ndimage[z].StudyDescription.upper() for text in skipped_Studies): continue
                 if len(ndimage[z].SeriesDescription) == 0: continue
 
                 # Make Sure identification matches or is null then add to the volume
-                if (this_ID == None or this_ID == ndimage[z].ImageType) and (this_series == None or this_series == ndimage[z].SeriesDescription):
+                if (this_ID == None or this_ID == ndimage[z].ImageType) and (
+                        this_series == None or this_series == ndimage[z].SeriesDescription):
                     this_ID = ndimage[z].ImageType
                     this_series = ndimage[z].SeriesDescription
                     real.append(ndimage[z])
                     if not test_ID:
-                        if display: print ('Win on try 1: ', this_series, end = '')
+                        if display: print('Win on try 1: ', ndimage[z].SeriesDescription, ndimage[z].SliceThickness, end='')
                         test_ID = True
 
-            except: continue
+            except:
+                continue
 
-        # No original series must exist if this following try statement fails, load a derived primary axial instead
+        # No original series must exist if this following try statement fails, load a body thin slice
         try: print (real[0].ImageType, end='')
         except:
 
             # Save only the original axial, use ID to save one series only
             del real
             real, this_ID, this_series, test_ID = [], None, None, None
-            if display: print ('First attempt to load DICOM failed, trying with less strict requirements')
+            if display: print ('No axial thin lungs, trying any <1.0mm')
             for z in range(len(ndimage)):
 
                 # Try statement to skip non DICOM slices
                 try:
 
-                    # Less strict on image type
-                    if ('PRIMARY' not in ndimage[z].ImageType) or ('AXIAL' not in ndimage[z].ImageType): continue
+                    # Now look for thin bodies
+                    if ('ORIGINAL' not in ndimage[z].ImageType) or ('PRIMARY' not in ndimage[z].ImageType) or ('AXIAL' not in ndimage[z].ImageType): continue
+                    if (float(ndimage[z].SliceThickness) > 0.99): continue
+
                     if any(text in ndimage[z].ImageType for text in skipped_ImageTypes): continue
                     if any(text in ndimage[z].SeriesDescription.upper() for text in skipped_Descriptions): continue
                     if any(text in ndimage[z].StudyDescription.upper() for text in skipped_Studies): continue
@@ -2440,30 +2458,32 @@ class SODLoader():
                         this_series = ndimage[z].SeriesDescription
                         real.append(ndimage[z])
                         if not test_ID:
-                            if display: print('Win on try 2: ', this_series, end='')
+                            if display: print('Win on try 2: ', ndimage[z].SeriesDescription, ndimage[z].SliceThickness, end='')
                             test_ID = True
 
                 except: continue
 
-        # At this point, we're up shit's creek
+        # Try for thicker slices
         try: print (real[0].ImageType)
         except:
 
             # Save only the original axial, use ID to save one series only
             del real
             real, this_ID, this_series, test_ID = [], None, None, None
-            skipped_Descriptions_shit = ['BONE', 'WITHOUT', 'TRACKER', 'SMART PREP', 'MONITORING']
-            if display: print('2nd attempt failed... up shits creek now...')
+            if display: print('2nd attempt failed... trying any < 4mm')
             for z in range(len(ndimage)):
 
                 # Try statement to skip non DICOM slices
                 try:
 
-                    # Skip less image types, load lung windows if available, don't skip empty descriptions
+                    # Now look for Any somewhat thin
                     if ('ORIGINAL' not in ndimage[z].ImageType) or ('PRIMARY' not in ndimage[z].ImageType) or ('AXIAL' not in ndimage[z].ImageType): continue
+                    if (float(ndimage[z].SliceThickness) > 4.99): continue
+
                     if any(text in ndimage[z].ImageType for text in skipped_ImageTypes): continue
-                    if any(text in ndimage[z].SeriesDescription.upper() for text in skipped_Descriptions_shit): continue
-                    if any(text in ndimage[z].StudyDescription for text in skipped_Studies): continue
+                    if any(text in ndimage[z].SeriesDescription.upper() for text in skipped_Descriptions): continue
+                    if any(text in ndimage[z].StudyDescription.upper() for text in skipped_Studies): continue
+                    if len(ndimage[z].SeriesDescription) == 0: continue
 
                     # Make Sure identification matches or is null then add to the volume
                     if (this_ID == None or this_ID == ndimage[z].ImageType) and (this_series == None or this_series == ndimage[z].SeriesDescription):
@@ -2471,10 +2491,41 @@ class SODLoader():
                         this_series = ndimage[z].SeriesDescription
                         real.append(ndimage[z])
                         if not test_ID:
-                            if display: print('Win on try 3: ', this_series, end='')
+                            if display: print('Win on try 3: ', ndimage[z].SeriesDescription, ndimage[z].SliceThickness, end='')
                             test_ID = True
 
                 except: continue
+
+        # Now we're just fucked
+        try: print(real[0].ImageType)
+        except:
+
+            # Save only the original axial, use ID to save one series only
+            del real
+            real, this_ID, this_series, test_ID = [], None, None, None
+            if display: print('Basically We will take anything now')
+            for z in range(len(ndimage)):
+
+                # Try statement to skip non DICOM slices
+                try:
+
+                    # Now look for Any somewhat thin
+                    if ('ORIGINAL' not in ndimage[z].ImageType) or ('PRIMARY' not in ndimage[z].ImageType) or ('AXIAL' not in ndimage[z].ImageType): continue
+                    if len(ndimage[z].SeriesDescription) == 0: continue
+
+                    # Make Sure identification matches or is null then add to the volume
+                    if (this_ID == None or this_ID == ndimage[z].ImageType) and (
+                            this_series == None or this_series == ndimage[z].SeriesDescription):
+                        this_ID = ndimage[z].ImageType
+                        this_series = ndimage[z].SeriesDescription
+                        real.append(ndimage[z])
+                        if not test_ID:
+                            if display: print('Win on try 4... : ', ndimage[z].SeriesDescription,
+                                              ndimage[z].SliceThickness, ndimage[z].ImageType, end='')
+                            test_ID = True
+
+                except:
+                    continue
 
         return real
 
