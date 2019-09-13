@@ -1004,15 +1004,20 @@ class SODLoader():
         return mask
 
 
-    def create_lung_mask(self, image, radius_erode=2):
+    def create_lung_mask(self, image, radius_erode=2, close=12, dilate=12):
         """
-        Method to create lung mask.
+        Creates a binary lung mask, 1 = lung, 0 = not lung
+        :param image: input lung CT
+        :param radius_erode:
+        :param close: a lower number closes more
+        :param dilate: a lower number dilates more
+        :return:
         """
 
         # Define the radius of the structuring elements
         height = image.shape[1]  # Holder for the variable
-        radius_close = np.round(height / 12).astype('int16')
-        radius_dilate = np.round(height / 12).astype('int16')
+        radius_close = np.round(height / close).astype('int16')
+        radius_dilate = np.round(height / dilate).astype('int16')
 
         # Create the structuring elements
         kernel_erode = cv2.getStructuringElement(shape=cv2.MORPH_ELLIPSE, ksize=(radius_erode, radius_erode))
@@ -1264,7 +1269,7 @@ class SODLoader():
     def resize_volume(self, image, dtype, x=256, y=256, z=None, c=None):
 
         """
-        Resize a volume to the new size
+        Resize a volume to the new size using open CV
         :param image: input image array
         :param dtype: the data type of the input
         :param x: new x dimensino
@@ -1566,12 +1571,12 @@ class SODLoader():
         """
 
         # Sometimes size is an array
-        if isinstance(size, int):
-            sizey = size
-            sizex = size
-        else:
+        try:
             sizey = int(size[0])
             sizex = int(size[1])
+        except:
+            sizey = size
+            sizex = size
 
         # First implement the 2D version
         if not dim3d:
@@ -2228,7 +2233,8 @@ class SODLoader():
         """
 
         # get total pixel count
-        tot_pixels = input.shape[0] * input.shape[1]
+        if dim_3d: tot_pixels = input.shape[0] * input.shape[1] * input.shape[2]
+        else: tot_pixels = input.shape[0] * input.shape[1]
 
         # Convert image to grayscale if not already
         if depth==3: input = cv2.cvtColor(input, cv2.COLOR_BGR2GRAY)
