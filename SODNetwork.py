@@ -416,8 +416,13 @@ class SODMatrix(object):
 
         # Set output feature maps
         orig_K = K
-        if S > 1: K = int(K / 4)
-        else: K = int(3 * K / 8)
+
+        try:
+            if S > 1: K = int(K / 4)
+            else: K = int(3 * K / 8)
+        except:
+            if any(x > 1 for x in S): K = int(K / 4)
+            else: K = int(3 * K / 8)
 
         # Set BN and relu
         if S == 1:
@@ -742,7 +747,11 @@ class SODMatrix(object):
             conv = self.convolution_3d('Conv2', conv, F, K, 1, padding, phase_train, True, False)
 
             # Downsample the residual input using strided 1x1 conv
-            if S>1: residual = self.convolution_3d('Res_down', residual, 1, K, S, padding, phase_train, True, False)
+            try:
+                if S>1: residual = self.convolution_3d('Res_down', residual, 2, K, S, padding, phase_train, False, False)
+            except:
+                if any(x > 1 for x in S):
+                    residual = self.convolution_3d('Res_down', residual, 2, K, S, padding, phase_train, False, False)
 
             # Add the Residual
             conv = tf.add(conv, residual)
@@ -860,7 +869,7 @@ class SODMatrix(object):
 
 
     def res_inc_layer_3d(self, scope, X, Fz, K, S=2, K_prob=None, padding='SAME',
-                       phase_train=None, DSC=False, BN=False, relu=False):
+                       phase_train=None, DSC=False, BN=True, relu=True):
         """
         This is a wrapper for implementing a residual layer with incepted layers between
         :param scope:

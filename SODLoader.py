@@ -905,10 +905,10 @@ class SODLoader():
         :return:
         """
 
-        resized_along_depth = self.resize_by_axis(image, y_dim, z_dim, 2, is_grayscale)
-        resized_along_width = self.resize_by_axis(resized_along_depth, y_dim, x_dim, 1, is_grayscale)
+        resized_along_depth = self.resize_3D_by_axis(image, y_dim, z_dim, 2, is_grayscale)
+        resized_along_width = self.resize_3D_by_axis(resized_along_depth, y_dim, x_dim, 1, is_grayscale)
 
-        return resized_along_width
+        return tf.transpose(resized_along_width, perm=[1, 0, 2])
 
 
     """
