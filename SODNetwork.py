@@ -741,17 +741,21 @@ class SODMatrix(object):
         with tf.variable_scope(scope) as scope:
 
             # First Convolution with BN and ReLU
-            conv = self.convolution_3d('Conv1', residual, F, K, S, padding, phase_train, True, True)
+            conv = self.convolution_3d('Conv1', residual, F, K, S, 'SAME', phase_train, True, True)
 
             # Second convolution without ReLU
             conv = self.convolution_3d('Conv2', conv, F, K, 1, padding, phase_train, True, False)
 
+            # Account for non valid padding for the residual
+            if padding=='VALID':
+                residual = self.convolution_3d('Res_down', residual, F, K, 1, padding, phase_train, False, False)
+
             # Downsample the residual input using strided 1x1 conv
             try:
-                if S>1: residual = self.convolution_3d('Res_down', residual, 2, K, S, padding, phase_train, False, False)
+                if S>1: residual = self.convolution_3d('Res_down', residual, 1, K, S, padding, phase_train, False, False)
             except:
                 if any(x > 1 for x in S):
-                    residual = self.convolution_3d('Res_down', residual, 2, K, S, padding, phase_train, False, False)
+                    residual = self.convolution_3d('Res_down', residual, 1, K, S, padding, phase_train, False, False)
 
             # Add the Residual
             conv = tf.add(conv, residual)
