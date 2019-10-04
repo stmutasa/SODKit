@@ -1704,6 +1704,73 @@ class SODLoader():
         else:
             return data[og[0] - bn[0]:og[0] + bn[0], og[1] - bn[1]:og[1] + bn[1]], og, bn
 
+
+    def is_odd(self, num):
+
+        """
+        Check if num is odd
+        :param num:
+        :return:
+        """
+        return num & 0x1
+
+
+    def pad_resize(self, input, out_size, pad_value='constant'):
+
+        """
+        Pads an input array to the output size with pad_value.
+        :param input: The input array
+        :param out_size: The desired output size [z, y, x], Must be bigger than input array
+        :param pad_mode: string, Pad with this mode, 'constant', edge, max, mean, etc
+        :return: the new padded array
+        """
+
+        # Convert arrays
+        input = np.squeeze(input)
+        out_size = np.asarray(out_size)
+
+        # Is this 3D or 2D
+        if input.ndim >= 3:
+            is_3d = True
+        else:
+            is_3d = False
+
+        if is_3d:
+
+            # Calculate how much to pad on each axis
+            xpad = xpad2 = (out_size[2] - input.shape[2]) // 2
+            ypad = ypad2 = (out_size[1] - input.shape[1]) // 2
+            zpad = zpad2 = (out_size[0] - input.shape[0]) // 2
+
+            # Handle odd numbers: 5//2 = 2
+            if self.is_odd(out_size[0]) != self.is_odd(input.shape[0]):
+                zpad2 = 1 + (out_size[0] - input.shape[0]) // 2
+
+            if self.is_odd(out_size[1]) != self.is_odd(input.shape[1]):
+                ypad2 = 1 + (out_size[1] - input.shape[1]) // 2
+
+            if self.is_odd(out_size[2]) != self.is_odd(input.shape[2]):
+                xpad2 = 1 + (out_size[2] - input.shape[2]) // 2
+
+            # Perform the pad
+            return np.pad(input, ((zpad, zpad2), (ypad, ypad2), (xpad, xpad2)), pad_value)
+
+        else:
+
+            # Calculate how much to pad on each axis
+            xpad = xpad2 = (out_size[1] - input.shape[1]) // 2
+            ypad = ypad2 = (out_size[0] - input.shape[0]) // 2
+
+            # Handle odd numbers: 5//2 = 2
+            if self.is_odd(out_size[0]) != self.is_odd(input.shape[0]):
+                ypad2 = 1 + (out_size[0] - input.shape[0]) // 2
+
+            if self.is_odd(out_size[1]) != self.is_odd(input.shape[1]):
+                xpad2 = 1 + (out_size[1] - input.shape[1]) // 2
+
+            # Perform the pad
+            return np.pad(input, ((ypad, ypad2), (xpad, xpad2)), pad_value)
+
     """
          Utility functions: Random tools for help
     """
