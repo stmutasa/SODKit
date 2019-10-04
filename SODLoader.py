@@ -1677,6 +1677,33 @@ class SODLoader():
         return np.squeeze(proj_data)
 
 
+    def crop_data(self, data, origin, boundaries):
+
+        """
+        Crops a given array
+        :param data: Input volume, numpy array
+        :param origin: Center of the crop, tuple
+        :param boundaries: z, y, x width of the crop, tuple
+        :return: The cropped volume
+        """
+
+        # Convert to numpy
+        data = np.squeeze(data)
+        og = np.asarray(origin)
+        bn = np.asarray(boundaries)
+
+        # Is this 3D or 2D
+        if data.ndim >= 3:
+            is_3d = True
+        else:
+            is_3d = False
+
+        # Now perform the cut
+        if is_3d:
+            return data[og[0] - bn[0]:og[0] + bn[0], og[1] - bn[1]:og[1] + bn[1], og[2] - bn[2]:og[2] + bn[2], ...], og, bn
+        else:
+            return data[og[0] - bn[0]:og[0] + bn[0], og[1] - bn[1]:og[1] + bn[1]], og, bn
+
     """
          Utility functions: Random tools for help
     """
