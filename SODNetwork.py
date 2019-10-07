@@ -91,7 +91,7 @@ class SODMatrix(object):
             return conv
 
 
-    def convolution_3d(self, scope, X, F, K, S=2, padding='SAME', phase_train=None, BN=True, relu=True, downsample=False, dropout=None):
+    def convolution_3d(self, scope, X, F, K, S=2, padding='SAME', phase_train=None, BN=True, relu=True, downsample=False, dropout=None, bias=True):
         """
         This is a wrapper for 3-dimensional convolutions
         :param scope:
@@ -105,6 +105,7 @@ class SODMatrix(object):
         :param relu: Whether to perform relu
         :param downsample: Whether to perform a max+avg pool downsample
         :param dropout: whether to apply channel_wise dropout
+        :param bias: Whether to apply bias
         :return:
         """
 
@@ -124,19 +125,18 @@ class SODMatrix(object):
             except: kernel = tf.get_variable('Weights', shape=[F, F, F, C, K],
                                      initializer=tf.contrib.layers.variance_scaling_initializer())
 
-            # Define the biases
-            bias = tf.get_variable('Bias', shape=[K], initializer=tf.constant_initializer(0.0))
-
             # Add to the weights collection
             tf.add_to_collection('weights', kernel)
-            tf.add_to_collection('biases', bias)
 
             # Perform the actual convolution
             try: conv = tf.nn.conv3d(X, kernel, [1, S[0], S[1], S[2], 1], padding=padding)
             except: conv = tf.nn.conv3d(X, kernel, [1, S, S, S, 1], padding=padding)
 
             # Add the bias
-            conv = tf.nn.bias_add(conv, bias)
+            if bias:
+                bias = tf.get_variable('Bias', shape=[K], initializer=tf.constant_initializer(0.0))
+                tf.add_to_collection('biases', bias)
+                conv = tf.nn.bias_add(conv, bias)
 
             # Relu activation
             if relu: conv = tf.nn.relu(conv, name=scope.name)
@@ -2130,6 +2130,7 @@ class SODLoss(object):
 
 
     def dice(self, prediction, ground_truth, weight_map=None):
+
         """
         Function to calculate the dice loss with the definition given in
 
@@ -2161,8 +2162,7 @@ class SODLoss(object):
                 tf.sparse_reduce_sum(one_hot * weight_map_nclasses,
                                      reduction_axes=[0])
         else:
-            dice_numerator = 2.0 * tf.sparse_reduce_sum(
-                one_hot * prediction, reduction_axes=[0])
+            dice_numerator = 2.0 * tf.sparse_reduce_sum(one_hot * prediction, reduction_axes=[0])
             dice_denominator = \
                 tf.reduce_sum(tf.square(prediction), reduction_indices=[0]) + \
                 tf.sparse_reduce_sum(one_hot, reduction_axes=[0])
@@ -2172,6 +2172,37 @@ class SODLoss(object):
         # dice_score.set_shape([num_classes])
         # minimising (1 - dice_coefficients)
         return 1.0 - tf.reduce_mean(dice_score)
+
+
+    def dice_simple(self, y_true, y_pred, dim3d=False, scalar=False):
+
+        """
+        No frills dice loss, returns a scalar
+        :param y_true:
+        :param y_pred:
+        :param dim3d: is this 3d or 2d
+        :param scalar: Return a scalar (true) or tensor
+        :return:
+        """
+
+        if scalar:
+            if not dim3d:
+                numerator = 2 * tf.reduce_sum(y_true * y_pred, axis=(1, 2, 3))
+                denominator = tf.reduce_sum(y_true + y_pred, axis=(1, 2, 3))
+
+                return 1 - numerator / denominator
+
+            else:
+                numerator = 2 * tf.reduce_sum(y_true * y_pred, axis=(1, 2, 3, 4))
+                denominator = tf.reduce_sum(y_true + y_pred, axis=(1, 2, 3, 4))
+
+                return 1 - numerator / denominator
+
+        else:
+            numerator = 2 * tf.reduce_sum(y_true * y_pred, axis=-1)
+            denominator = tf.reduce_sum(y_true + y_pred, axis=-1)
+
+            return 1 - (numerator + 1) / (denominator + 1)
 
 
     def dice_nosquare(self, prediction, ground_truth, weight_map=None):
@@ -2316,3 +2347,15 @@ class SODLoss(object):
 
         dice_score = (dice_numerator + epsilon) / (dice_denominator + epsilon)
         return 1.0 - tf.reduce_mean(dice_score)
+
+
+    def weighted_cross_entropy(self, prediction, ground_truth, beta):
+        """
+        Weighted cross entropy where all positives get weighted by a coefficient
+        :param prediction:
+        :param ground_truth:
+        :param beta: > 1 decreases false negatives, <1 decreases false positives
+        :return:
+        """
+
+        return tf.nn.weighted_cross_entropy_with_logits(ground_truth, prediction, beta)
