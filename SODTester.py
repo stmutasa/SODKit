@@ -13,6 +13,7 @@ import tensorflow as tf
 
 from skimage.transform import resize
 from scipy import interp
+from skimage import morphology
 
 import cv2
 import scipy.misc
@@ -654,6 +655,34 @@ class SODTester():
         except: return None
 
 
+    def return_fixed_segmentation(self, logits, threshold=0.5, class_desired=1, return_blob=False):
+
+        """
+        Returns a binary (True False) segmentation mask of the predictions with the threshold. Should work for 2D or 3D
+        :param logits: Raw logits, Batch*Z*Y*X*n_classes
+        :param threshold: Threshold to reach before you declare true
+        :param class_desired: Which class you want back
+        :param return_blob: return only the largest blob (remove all smaller blobs
+        :return: largest blob and center if true, just the mask if false
+        """
+
+        # Make nparray
+        logits = np.asarray(logits)
+
+        # Get softmax
+        softmaxed = self.calc_softmax_old(logits)
+
+        # Retreive map of desired class
+        sn = softmaxed[..., class_desired]
+
+        # Make binary with threshold
+        sn[sn < threshold] = False
+        sn[sn >= threshold] = True
+
+        if return_blob: return self.largest_blob(sn)
+        else: return sn
+
+
     def calc_DICE(self, im1, im2, empty_score=1.0):
         """
         Computes the DICE coefficient
@@ -1234,3 +1263,36 @@ class SODTester():
         cc1 = np.swapaxes(gd_gb[0], 0, 1)
         scipy.misc.imsave((save_dir + ('%s_Guided_Grad_Cam_FlipUD.png' % index)), np.flipud(cc1))
         scipy.misc.imsave((save_dir + ('%s_Guided_Grad_Cam_FlipLR.png' % index)), np.fliplr(cc1))
+
+
+    def largest_blob(self, img):
+
+        """
+        This finds the biggest blob in a 2D or 3D volume and returns the center of the blob
+        :param img: the binary input volume
+        :return: img if no labels, labels if there is. and cn: an array with the center locations [z, y, x]
+        """
+
+        # Only work if a mask actually exists
+        if np.max(img) > 0:
+
+            # Labels all the blobs of connected pixels
+            labels = morphology.label(img)
+
+            # Counts the number of ocurences of each value, then returns the 2nd biggest blob (0 occurs the most)
+            N = np.bincount(labels.flatten())[1:].argmax() + 1
+
+            # Mark the blob
+            labels = (labels == N)
+
+            # Find the center of mass
+            cn = scipy.measurements.center_of_mass(labels)
+
+            if labels.ndim == 3: cn = [int(cn[0]), int(cn[1]), int(cn[2])]
+            else: cn = [int(cn[0]), int(cn[1])]
+
+            # Return the parts of the label equal to the 2nd biggest blob
+            return labels, cn
+
+        else:
+            return img

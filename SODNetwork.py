@@ -2174,37 +2174,6 @@ class SODLoss(object):
         return 1.0 - tf.reduce_mean(dice_score)
 
 
-    def dice_simple(self, y_true, y_pred, dim3d=False, scalar=False):
-
-        """
-        No frills dice loss, returns a scalar
-        :param y_true:
-        :param y_pred:
-        :param dim3d: is this 3d or 2d
-        :param scalar: Return a scalar (true) or tensor
-        :return:
-        """
-
-        if scalar:
-            if not dim3d:
-                numerator = 2 * tf.reduce_sum(y_true * y_pred, axis=(1, 2, 3))
-                denominator = tf.reduce_sum(y_true + y_pred, axis=(1, 2, 3))
-
-                return 1 - numerator / denominator
-
-            else:
-                numerator = 2 * tf.reduce_sum(y_true * y_pred, axis=(1, 2, 3, 4))
-                denominator = tf.reduce_sum(y_true + y_pred, axis=(1, 2, 3, 4))
-
-                return 1 - numerator / denominator
-
-        else:
-            numerator = 2 * tf.reduce_sum(y_true * y_pred, axis=-1)
-            denominator = tf.reduce_sum(y_true + y_pred, axis=-1)
-
-            return 1 - (numerator + 1) / (denominator + 1)
-
-
     def dice_nosquare(self, prediction, ground_truth, weight_map=None):
         """
         Function to calculate the classical dice loss
