@@ -2020,14 +2020,17 @@ class SODLoader():
         return vol
 
 
-    def gray2rgb(self, img):
+    def gray2rgb(self, img, RGB=True):
 
         """
         Use open CV to convert HxW grayscale image to HxWxC RGB image
         :param img: The input image as numpy array
+        :param RGB: True = RGB, False = BGR
         :return: the converted image
         """
-        return cv2.cvtColor(img,cv2.COLOR_GRAY2RGB)
+
+        if RGB: return cv2.cvtColor(img,cv2.COLOR_GRAY2RGB)
+        else: return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
 
 
     def random_3daffine(self, angle=45):
