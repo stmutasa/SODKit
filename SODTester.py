@@ -7,13 +7,14 @@ mean absolute error, mean squared error, DICE score, sensitivity, specificity, A
 
 import matplotlib.pyplot as plt
 import numpy as np
-import sklearn.metrics as skm
 import pandas as pd
 import tensorflow as tf
 
 from skimage.transform import resize
-from scipy import interp
 from skimage import morphology
+import sklearn.metrics as skm
+from scipy import interp
+import scipy.ndimage as scipy
 
 import cv2
 import scipy.misc
@@ -655,22 +656,33 @@ class SODTester():
         except: return None
 
 
-    def return_fixed_segmentation(self, logits, threshold=0.5, class_desired=1, return_blob=False):
+    def return_binary_segmentation(self, logits, threshold=0.5, class_desired=1):
 
         """
         Returns a binary (True False) segmentation mask of the predictions with the threshold. Should work for 2D or 3D
         :param logits: Raw logits, Batch*Z*Y*X*n_classes
         :param threshold: Threshold to reach before you declare true
         :param class_desired: Which class you want back
-        :param return_blob: return only the largest blob (remove all smaller blobs
         :return: largest blob and center if true, just the mask if false
         """
 
         # Make nparray
         logits = np.asarray(logits)
 
-        # Get softmax
-        softmaxed = self.calc_softmax_old(logits)
+        # If we include batch size
+        if logits.ndim == 5:
+
+            # Have to do in a batch manner
+            softmaxed = np.zeros_like(logits)
+            for z in range (softmaxed.shape[0]):
+                softmaxed[z] = self.calc_softmax_old(logits[z])
+                #softmaxed[z] = self.calc_softmax(logits[z])
+
+        else:
+
+            # Get softmax
+            softmaxed = self.calc_softmax_old(logits)
+            #softmaxed = self.calc_softmax(logits)
 
         # Retreive map of desired class
         sn = softmaxed[..., class_desired]
@@ -679,8 +691,7 @@ class SODTester():
         sn[sn < threshold] = False
         sn[sn >= threshold] = True
 
-        if return_blob: return self.largest_blob(sn)
-        else: return sn
+        return sn
 
 
     def calc_DICE(self, im1, im2, empty_score=1.0):

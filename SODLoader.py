@@ -15,11 +15,11 @@ import pydicom as dicom
 import nibabel as nib
 import tensorflow as tf
 import SimpleITK as sitk
-import scipy.ndimage as scipy
 import matplotlib.image as mpimg
 import pandas as pd
 
 from scipy.io import loadmat
+import scipy.ndimage as scipy
 from skimage import morphology
 import imageio
 
