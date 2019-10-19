@@ -17,6 +17,8 @@ from scipy import interp
 import scipy.ndimage as scipy
 
 import cv2
+import os
+import imageio
 import scipy.misc
 
 class SODTester():
@@ -558,140 +560,71 @@ class SODTester():
         return p
 
 
-    def calc_metrics_segmentation_no_mask(self, logitz, label_in, display=False, images=None, dice_threshold=0.5, batch_size=32):
-
-        # Convert to numpy arrays
-        logitz = np.squeeze(logitz.astype(np.float))
-        images = np.squeeze(images.astype(np.float))
-        labelz = np.squeeze(label_in.astype(np.float))
-        dice_score = 0
-
-        for i in range(0, batch_size):
-
-            # Retreive one image, label and prediction from the batch to save
-            prediction = logitz[i, :, :, 1]
-
-            # Manipulations to improve display data
-            pred1 = 1 - prediction  # Invert the softmax
-
-            # First create copies
-            p1 = np.copy(pred1)  # make an independent copy of logits map
-            p2 = np.copy(labelz[i])  # make an independent copy of labels map
-
-            # Now create boolean masks
-            p1[p1 > dice_threshold] = True  # Set predictions above threshold value to True
-            p1[p1 <= dice_threshold] = False  # Set those below to False
-            p2[p2 == 0] = False  # Mark lung and background as False
-            p2[p2 > 0] = True  # Mark nodules as True
-
-            # calculate DICE score
-            dice_score = self.calc_DICE(p1, p2, 1.0)
-
-            if display:
-                self.display_single_image(p1, False, 'Predictions')
-                self.display_single_image(p2, False, 'Label')
-                self.display_mosaic(images[0], plot=False, title='Input Slices', size=[40, 40], cbar=False, cmap='gray')
-
-        # Test
-        if display: plt.show()
-
-        # garbage
-        del logitz, images, labelz, prediction, pred1, p1, p2
-
-        # Return the DICE score
-        return dice_score/batch_size
-
-
-    def calc_metrics_segmentation(self, logitz, label_in, images=None, dice_threshold=0.5, batch_size=32, display=False):
-
-        # Convert to numpy arrays
-        logitz = np.squeeze(logitz.astype(np.float))
-        labelz = np.squeeze(label_in.astype(np.float))
-        images = np.squeeze(images.astype(np.float))
-        total, dice_score = 0, 0
-
-        for i in range(0, batch_size):
-
-            # Retreive one image, label and prediction from the batch to save
-            prediction = logitz[i, :, :, 1]
-
-            # Manipulations to improve display data
-            lbl2 = np.copy(labelz[i])  # Copy since we will print below
-            pred1 = 1 - prediction  # Invert the softmax
-            lbl2[lbl2 > 0] = 1  # For removing background noise in the image
-
-            # Zero out the background on the predicted map
-            pred2 = np.multiply(np.squeeze(pred1), np.squeeze(lbl2))
-
-            # First create copies
-            p1 = np.copy(pred2)  # make an independent copy of logits map
-            p2 = np.copy(labelz[i])  # make an independent copy of labels map
-
-            # Now create boolean masks
-            p1[p1 > dice_threshold] = True  # Set predictions above threshold value to True
-            p1[p1 <= dice_threshold] = False  # Set those below to False
-            p2[p2 <= 1] = False  # Mark lung and background as False
-            p2[p2 > 1] = True  # Mark nodules as True
-
-            # Calculate DICE score
-            dice = self.calc_DICE(p1, p2, None)
-
-            if dice:
-                dice_score +=dice
-                total += 1
-
-            if display:
-                self.display_single_image(p1, False, 'Predictions')
-                self.display_single_image(p2, False, 'Label')
-                self.display_mosaic(images[0], plot=False, title='Input Slices', size=[40, 40], cbar=False, cmap='gray')
-
-        # Test
-        if display: plt.show()
-
-        # garbage
-        del logitz, labelz, images, prediction, pred1, p1, p2
-
-        # Return the DICE score
-        try: return dice_score / total
-        except: return None
-
-
-    def return_binary_segmentation(self, logits, threshold=0.5, class_desired=1):
+    def return_binary_segmentation(self, norm_logits, threshold=0.5, class_desired=1, largest_blob=False):
 
         """
         Returns a binary (True False) segmentation mask of the predictions with the threshold. Should work for 2D or 3D
-        :param logits: Raw logits, Batch*Z*Y*X*n_classes
+        :param norm_logits: Normalized logits, Batch*Z*Y*X*n_classes
         :param threshold: Threshold to reach before you declare true
         :param class_desired: Which class you want back
+        :param largest_blob: Whether to return the largest blob or all blobs
         :return: largest blob and center if true, just the mask if false
         """
 
         # Make nparray
-        logits = np.asarray(logits)
-
-        # If we include batch size
-        if logits.ndim == 5:
-
-            # Have to do in a batch manner
-            softmaxed = np.zeros_like(logits)
-            for z in range (softmaxed.shape[0]):
-                softmaxed[z] = self.calc_softmax_old(logits[z])
-                #softmaxed[z] = self.calc_softmax(logits[z])
-
-        else:
-
-            # Get softmax
-            softmaxed = self.calc_softmax_old(logits)
-            #softmaxed = self.calc_softmax(logits)
+        norm_logits = np.asarray(norm_logits)
 
         # Retreive map of desired class
-        sn = softmaxed[..., class_desired]
+        sn = norm_logits[..., class_desired]
 
         # Make binary with threshold
         sn[sn < threshold] = False
         sn[sn >= threshold] = True
 
+        # Get the largest blob
+        if largest_blob:
+
+            if sn.ndim==5:
+
+                temp = np.zeros_like(sn)
+                for z in range(temp.shape[0]):
+                    temp[z], _ = self.largest_blob(sn[z])
+
+                temp, sn = sn, temp
+                del temp
+
+            else: sn, _ = self.largest_blob(sn)
+
         return sn
+
+
+    def calculate_segmentation_metrics(self, predictions, ground_truth):
+
+        """
+        Calculate Dice Score and Matthews Correlation
+        :param predictions:
+        :param ground_truth:
+        :return: dice, mcc
+        """
+
+        # Flatten, makes it work with any dimensions
+        flat_pred, flat_lab = np.reshape(predictions, [-1]), np.reshape(ground_truth, [-1])
+
+        # Return the confusion matrix
+        tn, fp, fn, tp = skm.confusion_matrix(flat_lab, flat_pred).ravel()
+        tn, fp, fn, tp = np.float64(tn), np.float64(fp), np.float64(fn), np.float64(tp)
+
+        # Calculate Dice score
+        dice = (2 * tp) / ((2 * tp) + fp + fn)
+
+        # Calculate matthews correlation
+        mcc = ((tp * tn) - (fp * fn)) / (np.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn)))
+
+        # Print results
+        print('DICE: %.3f, Matthews Correlation: %.3f \n'
+              'TP:%s, TN%s, FP:%s, FN:%s' % (dice, mcc, tp, tn, fp, fn))
+
+        return dice, mcc
 
 
     def calc_DICE(self, im1, im2, empty_score=1.0):
@@ -1307,3 +1240,68 @@ class SODTester():
 
         else:
             return img
+
+    def plot_img_and_mask(self, img, mask_pred, mask_true, fn):
+
+        """
+        Saves a gif of your image, mask, and predictions
+        :param img:
+        :param mask_pred:
+        :param mask_true:
+        :param fn:
+        :return:
+        """
+        plt.ioff()
+        # Normalize
+        norm = img / np.max(img)
+
+        # # Rotate
+        # norm = np.rot90(norm, k=1, axes=(0, 1))
+
+        # Plot reference Image
+        fig = plt.figure()
+        a = fig.add_subplot(1, 2, 1)
+        a.set_title('Reference image')
+        plt.imshow(norm, 'Greys')
+
+        # Plot mask
+        b = fig.add_subplot(1, 2, 2)
+
+        overlap = np.multiply(mask_pred, mask_true)
+        falseneg = mask_true - overlap
+        falsepos = mask_pred - overlap
+
+        tmpimg = np.zeros((mask_true.shape[0], mask_pred.shape[1], 3))
+        tmpimg[:, :, 0] = falseneg
+        tmpimg[:, :, 1] = overlap
+        tmpimg[:, :, 2] = falsepos
+
+        plt.imshow(tmpimg)
+        b.set_title('Output mask')
+        plt.savefig(fn, bbox_inches='tight')
+        plt.close()
+
+
+    def plot_img_and_mask3D(self, img, mask_pred, mask_true, fn):
+
+        """
+        saves a .gif of your image, mask, and predictions
+        :param img:
+        :param mask_pred:
+        :param mask_true:
+        :param fn:
+        :return:
+        """
+        plt.ioff()
+        tmpfolder = os.path.dirname(fn)
+        assert img.shape == mask_pred.shape
+        assert mask_pred.shape == mask_true.shape
+        images = []
+        for z in range(img.shape[2]):
+            tmpimg = img[:, :, z]
+            tmpmaskp = mask_pred[:, :, z]
+            tmpmaskt = mask_true[:, :, z]
+            tmpfn = os.path.join(tmpfolder, 'tmp' + str(z).zfill(3) + '.png')
+            self.plot_img_and_mask(tmpimg, tmpmaskp, tmpmaskt, tmpfn)
+            images.append(imageio.imread(tmpfn))
+        imageio.mimsave(fn, images)
