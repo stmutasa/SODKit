@@ -642,6 +642,13 @@ class SOD_Display(SODLoader):
         self.display_volume(overlay, plot)
 
 
+    def display_breast_mask(self, im, mask):
+
+        f = plt.figure(figsize=(12, 12))
+        ax = plt.subplot(111)
+        ax.imshow(im, vmin=0, vmax=4096, cmap='gray')
+        ax.imshow(mask, alpha=.3, cmap='inferno')  # alpha controls the transparency
+
 
     def save_image(self, image, path, format=None, type=None):
 

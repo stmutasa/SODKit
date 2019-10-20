@@ -20,9 +20,17 @@ import pandas as pd
 
 from scipy.io import loadmat
 import scipy.ndimage as scipy
-from skimage import morphology
+from scipy.ndimage import binary_fill_holes
+
 import imageio
 
+import skimage.exposure as hist
+from skimage import morphology
+from skimage.filters.rank import median
+from skimage.measure import regionprops
+from skimage.morphology import disk
+from skimage.segmentation import felzenszwalb
+from skimage.transform import rescale
 
 class SODLoader():
 
@@ -933,7 +941,7 @@ class SODLoader():
         return voxelCoord
 
 
-    def create_breast_mask(self, image, threshold=15, size_denominator=45):
+    def create_MRI_breast_mask(self, image, threshold=15, size_denominator=45):
         """
         Creates a rough mask of breast tissue returned as 1 = breast 0 = nothing
         :param image: the input volume (3D numpy array)
@@ -943,7 +951,7 @@ class SODLoader():
         """
 
         # Create the mask
-        mask = np.copy(image)
+        mask = np.copy(np.squeeze(image))
 
         # Loop through the image volume
         for k in range(0, image.shape[0]):
@@ -971,12 +979,14 @@ class SODLoader():
         return mask
 
 
-    def create_mammo_mask(self, image, threshold=800):
+    def create_mammo_mask(self, image, threshold=800, check_mask=False):
 
         """
 
         :param image: input mammogram
         :param threshold: Pixel value to use for threshold
+        :param check_mask: Check mask to make sure it's not fraudulent, i.e. covers > 80% or <10% of the image
+            if it is, then use the other mask function
         :return:
         """
 
@@ -1001,7 +1011,139 @@ class SODLoader():
         # Just use morphological closing
         mask = cv2.morphologyEx(mask.astype(np.int16), cv2.MORPH_CLOSE, kernel_close)
 
+        if check_mask:
+
+            # Check if mask is too much or too little
+            mask_idx = np.sum(mask) / (image.shape[0] * image.shape[1])
+
+            # If it is, try again
+            if mask_idx > 0.8 or mask_idx < 0.1:
+
+                print('Mask Failed... using method 2')
+                del mask
+                mask, _ = self.create_breast_mask2(image)
+
+
         return mask
+
+
+    def create_breast_mask2(self, im, scale_factor=0.25, threshold=3900, felzenzwalb_scale=0.15):
+
+        """
+        Fully automated breast segmentation in mammographies.
+        https://github.com/olieidel/breast_segment
+        :param im: Image
+        :param scale_factor: Scale Factor
+        :param threshold: Threshold
+        :param felzenzwalb_scale: Felzenzwalb Scale
+        :return: (im_mask, bbox) where im_mask is the segmentation mask and
+        bbox is the bounding box (rectangular) of the segmentation.
+        """
+
+        # set threshold to remove artifacts around edges
+        im_thres = im.copy()
+        im_thres[im_thres > threshold] = 0
+
+        # determine breast side
+        col_sums_split = np.array_split(np.sum(im_thres, axis=0), 2)
+        left_col_sum = np.sum(col_sums_split[0])
+        right_col_sum = np.sum(col_sums_split[1])
+
+        if left_col_sum > right_col_sum:
+            breast_side = 'l'
+        else:
+            breast_side = 'r'
+
+        # rescale and filter aggressively, normalize
+        im_small = rescale(im_thres, scale_factor)
+        im_small_filt = median(im_small, disk(50))
+        # this might not be helping, actually sometimes it is
+        im_small_filt = hist.equalize_hist(im_small_filt)
+
+        # run mr. felzenzwalb
+        segments = felzenszwalb(im_small_filt, scale=felzenzwalb_scale)
+        segments += 1  # otherwise, labels() would ignore segment with segment=0
+
+        props = regionprops(segments)
+
+        # Sort Props by area, descending
+        props_sorted = sorted(props, key=lambda x: x.area, reverse=True)
+
+        expected_bg_index = 0
+        bg_index = expected_bg_index
+
+        bg_region = props_sorted[bg_index]
+        minr, minc, maxr, maxc = bg_region.bbox
+        filled_mask = bg_region.filled_image
+
+        im_small_fill = np.zeros((im_small_filt.shape[0] + 2, im_small_filt.shape[1] + 1), dtype=int)
+
+        if breast_side == 'l':
+            # breast expected to be on left side,
+            # pad on right and bottom side
+            im_small_fill[minr + 1:maxr + 1, minc:maxc] = filled_mask
+            im_small_fill[0, :] = 1  # top
+            im_small_fill[-1, :] = 1  # bottom
+            im_small_fill[:, -1] = 1  # right
+        elif breast_side == 'r':
+            # breast expected to be on right side,
+            # pad on left and bottom side
+            im_small_fill[minr + 1:maxr + 1, minc + 1:maxc + 1] = filled_mask  # shift mask to right side
+            im_small_fill[0, :] = 1  # top
+            im_small_fill[-1, :] = 1  # bottom
+            im_small_fill[:, 0] = 1  # left
+
+        im_small_fill = binary_fill_holes(im_small_fill)
+
+        im_small_mask = im_small_fill[1:-1, :-1] if breast_side == 'l' \
+            else im_small_fill[1:-1, 1:]
+
+        # rescale mask
+        im_mask = self.zoom_2D(im_small_mask.astype(np.float32), [im.shape[1], im.shape[0]]).astype(bool)
+
+        # invert!
+        im_mask = ~im_mask
+
+        # determine side of breast in mask and compare
+        col_sums_split = np.array_split(np.sum(im_mask, axis=0), 2)
+        left_col_sum = np.sum(col_sums_split[0])
+        right_col_sum = np.sum(col_sums_split[1])
+
+        if left_col_sum > right_col_sum:
+            breast_side_mask = 'l'
+        else:
+            breast_side_mask = 'r'
+
+        if breast_side_mask != breast_side:
+            # breast mask is not on expected side
+            # we might have segmented bg instead of breast
+            # so invert again
+            print('breast and mask side mismatch. inverting!')
+            im_mask = ~im_mask
+
+        # exclude thresholded area (artifacts) in mask, too
+        im_mask[im > threshold] = False
+
+        # fill holes again, just in case there was a high-intensity region
+        # in the breast
+        im_mask = binary_fill_holes(im_mask)
+
+        # if no region found, abort early and return mask of complete image
+        if im_mask.ravel().sum() == 0:
+            all_mask = np.ones_like(im).astype(bool)
+            bbox = (0, 0, im.shape[0], im.shape[1])
+            print('Couldn\'t find any segment')
+            return all_mask, bbox
+
+        # get bbox
+        minr = np.argwhere(im_mask.any(axis=1)).ravel()[0]
+        maxr = np.argwhere(im_mask.any(axis=1)).ravel()[-1]
+        minc = np.argwhere(im_mask.any(axis=0)).ravel()[0]
+        maxc = np.argwhere(im_mask.any(axis=0)).ravel()[-1]
+
+        bbox = (minr, minc, maxr, maxc)
+
+        return im_mask, bbox
 
 
     def create_lung_mask(self, image, radius_erode=2, close=12, dilate=12):
@@ -1906,6 +2048,7 @@ class SODLoader():
 
 
     def normalize_MRI_histogram(self, image, return_values=False, center_type='mean'):
+
         """
         Uses histogram normalization to normalize MRI data by removing 0 values
         :param image: input volume numpy array
@@ -1942,53 +2085,15 @@ class SODLoader():
         else: return image
 
 
-    def normalize_Mammo_histogram(self, image, return_values=False, center_type='mean'):
+    def adaptive_normalization(self, image):
 
         """
-        Uses histogram normalization to normalize mammography data by removing 0 values
-        :param image: input volume numpy array
-        :param return_values: Whether to return the mean, std and mode values as well
-        :param center_type: What to center the data with, 'mean' or 'mode'
-        :return:
+        Contrast localized adaptive histogram normalization
+        :param image: ndarray
+        :return: normalized image
         """
 
-        # First save a copy of the real image
-        img = np.copy(image)
-
-        # First generate a mammo mask then apply it
-        mask = self.create_mammo_mask(image)
-        image *= mask.astype(image.dtype)
-
-        # First calculate the most commonly occuring values in the volume
-        occurences, values = np.histogram(image, bins=500)
-
-        # Remove 0 values (AIR) which always win
-        occurences, values = occurences[1:], values[1:]
-
-        # The mode is the value array at the index of highest occurence
-        mode = values[np.argmax(occurences)]
-
-        # Make dummy no zero image array to calculate STD
-        dummy, img_temp = [], np.copy(image).flatten()
-        for z in range(len(img_temp)):
-            if img_temp[z] > 5: dummy.append(img_temp[z])
-
-        # Mean/std is calculated from nonzero values only
-        dummy = np.asarray(dummy, np.float32)
-        std, mean = np.std(dummy), np.mean(dummy)
-
-        # Now divide the image by the modified STD
-        if center_type == 'mode':
-            img = img.astype(np.float32) - mode
-        else:
-            img = img.astype(np.float32) - mean
-        img /= std
-
-        # Return values or just volume
-        if return_values:
-            return img, mean, std, mode
-        else:
-            return img
+        return hist.equalize_adapthist(image)
 
 
     def reshape_NHWC(self, vol, NHWC):
