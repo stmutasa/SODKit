@@ -1831,7 +1831,7 @@ class SODLoader():
             return labels, cn
 
         else:
-            return img
+            return img, img.shape//2
 
 
     def all_blobs(self, img):
