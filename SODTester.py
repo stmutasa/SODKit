@@ -13,8 +13,11 @@ import tensorflow as tf
 from skimage.transform import resize
 from skimage import morphology
 import sklearn.metrics as skm
+
 from scipy import interp
 import scipy.ndimage as scipy
+from SODLoader import SODLoader
+sdl = SODLoader('data/')
 
 import cv2
 import os
@@ -584,16 +587,16 @@ class SODTester():
         # Get the largest blob
         if largest_blob:
 
-            if sn.ndim==5:
+            if sn.ndim==4:
 
                 temp = np.zeros_like(sn)
                 for z in range(temp.shape[0]):
-                    temp[z], _ = self.largest_blob(sn[z])
+                    temp[z], _ = sdl.largest_blob(sn[z])
 
                 temp, sn = sn, temp
                 del temp
 
-            else: sn, _ = self.largest_blob(sn)
+            else: sn, _ = sdl.largest_blob(sn)
 
         return sn
 
@@ -1208,38 +1211,6 @@ class SODTester():
         scipy.misc.imsave((save_dir + ('%s_Guided_Grad_Cam_FlipUD.png' % index)), np.flipud(cc1))
         scipy.misc.imsave((save_dir + ('%s_Guided_Grad_Cam_FlipLR.png' % index)), np.fliplr(cc1))
 
-
-    def largest_blob(self, img):
-
-        """
-        This finds the biggest blob in a 2D or 3D volume and returns the center of the blob
-        :param img: the binary input volume
-        :return: img if no labels, labels if there is. and cn: an array with the center locations [z, y, x]
-        """
-
-        # Only work if a mask actually exists
-        if np.max(img) > 0:
-
-            # Labels all the blobs of connected pixels
-            labels = morphology.label(img)
-
-            # Counts the number of ocurences of each value, then returns the 2nd biggest blob (0 occurs the most)
-            N = np.bincount(labels.flatten())[1:].argmax() + 1
-
-            # Mark the blob
-            labels = (labels == N)
-
-            # Find the center of mass
-            cn = scipy.measurements.center_of_mass(labels)
-
-            if labels.ndim == 3: cn = [int(cn[0]), int(cn[1]), int(cn[2])]
-            else: cn = [int(cn[0]), int(cn[1])]
-
-            # Return the parts of the label equal to the 2nd biggest blob
-            return labels, cn
-
-        else:
-            return img
 
     def plot_img_and_mask(self, img, mask_pred, mask_true, fn):
 
