@@ -2337,7 +2337,7 @@ class SODLoader():
         for y in range(xvals): writer[y].close()
 
 
-    def save_filtered_tfrecords(self, xvals=2, data={}, ID_key='ID', file_root='data/data'):
+    def save_segregated_tfrecords(self, xvals=2, data={}, ID_key='ID', file_root='data/data'):
 
         """
         Sequestered each patient by id key into unique tfrecords and saves
