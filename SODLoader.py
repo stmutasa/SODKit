@@ -2337,6 +2337,54 @@ class SODLoader():
         for y in range(xvals): writer[y].close()
 
 
+    def save_filtered_tfrecords(self, xvals=2, data={}, ID_key='ID', file_root='data/data'):
+
+        """
+        Sequestered each patient by id key into unique tfrecords and saves
+        :param xvals: Number of different files to save
+        :param data: The input dictionary
+        :param ID_key: The key of the input dic that segregates the patient (i.e. MRN or Accno)
+        :param file_root: The root of the file to save
+        :return:
+        """
+
+        # Variables to track
+        dictonaries = [dict() for _ in range(xvals)]
+        ID_track = [list() for _ in range(xvals)]
+        index = 0
+
+        for idx, dic in data.items():
+
+            # Tracker to see if already added plus dict to use tracker
+            added = 0
+            target = index % xvals
+
+            # If this ID already exists in a dictionary, save to that dictionary
+            for z in range(xvals):
+
+                if dic[ID_key] in ID_track[z]:
+                    # Success, use this one
+                    dictonaries[z][index] = dic
+                    added = 1
+                    break
+
+            # Then continue
+            if added == 1:
+                index += 1
+                continue
+
+            # Failed to find a preexisting, save in the target dictionary
+            dictonaries[target][index] = dic
+            ID_track[target].append(dic[ID_key])
+            index += 1
+
+        # Now save the tfrecords
+        for z in range(xvals):
+            file = file_root + '_' + str(z)
+            print('Saving segregated tfrecords... %s in %s' % (len(dictonaries[z]), file))
+            self.save_tfrecords(dictonaries[z], 1, file_root=file)
+
+
     def convert_xray_negative(self, image):
 
         """
