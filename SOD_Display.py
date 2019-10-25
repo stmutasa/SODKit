@@ -693,6 +693,13 @@ class SOD_Display(SODLoader):
         fname, _ = os.path.splitext(filename)
         filename = fname + '.gif'
 
+        # Normalize the volume into 0-255 range for .gif file
+        volume_norm = np.zeros_like(array, dtype=np.uint8)
+        for z in range(array.shape[0]):
+            volume_norm[z] = cv2.normalize(array[z], dst=volume_norm[z], alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+        volume_norm, array = array, volume_norm
+        del volume_norm
+
         # copy into the color dimension if the images are black and white
         if array.ndim == 3:
             array = array[..., np.newaxis] * np.ones(3)
