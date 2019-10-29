@@ -23,6 +23,7 @@ import scipy.ndimage as scipy
 from scipy.ndimage import binary_fill_holes
 
 import imageio
+from medpy.io import save as mpsave
 
 import skimage.exposure as hist
 from skimage import morphology
@@ -781,6 +782,20 @@ class SODLoader():
 
         # Way more powerful than this but we will go on a PRN basis
         imageio.imwrite(path, image, format=format)
+
+
+    def save_volume(self, volume, path, header=False, overwrite=True, compress=False):
+        """
+        Saves a volume into nii. nii.gz, .dcm, .dicom, .nrrd, .mhd and others
+        :param volume: 3d numpy array
+        :param path: save path
+        :param header: The header information with metadata
+        :param overwrite: Overwrite existing
+        :param compress: compress the image (if supported)
+        :return:
+        """
+
+        mpsave(volume, path, header, overwrite, compress)
 
 
     def RCNN_extract_box_labels(self, mask, dim_3d=False):
