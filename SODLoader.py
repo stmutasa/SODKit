@@ -140,41 +140,51 @@ class SODLoader():
         else: return image, numpyOrigin, numpySpacing, dims
 
 
-    def load_nrrd_3D(self, path, dtype=np.int16):
-        """
-        Load a 3D nrrd file with header info
-        :param path:
-        :param dtype:
-        :return: image, origin, spacing,shape
-        """
-
-        # Load the file
-        image_all = sitk.ReadImage(path)
-
-        # get the image data
-        image = np.squeeze(sitk.GetArrayFromImage(image_all))
-
-        # Retreive the origin
-        origin = np.asarray(image_all.GetOrigin())
-
-        # retreive spacing
-        spacing = np.asarray(image_all.GetSpacing())
-
-        return image.astype(dtype), origin, spacing, image.shape
-
-
-    def load_nrrd(self, path, dtype=np.int16, dim3d=True):
+    def load_nrrd(self, path, dtype=np.int16, pad_shape=None):
 
         """
         Loads an NRRD with pynrrd and returns a numpy array
         :param path: file to load
         :param dtype: filetype to return
-        :param dim3d: Whether this is 3D or not
+        :param pad_shape: NRRD sometimes doesnt save the whole volume (just the segments). And we have to pad it
+        If you leave it at none we wont pad, otherwise we will
         :return: A numpy array
         """
 
         # Read file and return a tuple and header
         data, header = nrrd.read(path, index_order='C')
+
+        # Convert to numpy array
+        if pad_shape: pad_shape = np.asarray(pad_shape)
+
+        # Pad the segmentations to fill the volume shape desired
+        if pad_shape.any() and data.ndim>2:
+
+            # 3D pad
+            data_pad = np.zeros([pad_shape[0], pad_shape[1], pad_shape[2], data.shape[3]])
+            origins = header['Segmentation_ReferenceImageExtentOffset'].split(' ')
+            orig = [int(x) for x in origins]
+            end = [orig[0]+data.shape[0], orig[1]+data.shape[1], orig[2]+data.shape[2]]
+
+            # Put in the ending coordinates
+            data_pad[orig[0]:end[0], orig[1]:end[1], orig[2]:end[2], :] = data
+
+            # Return values to data
+            data, data_pad = data_pad, data
+
+        # The 2D version
+        elif pad_shape.any():
+
+            data_pad = np.zeros([pad_shape[0], pad_shape[1], data.shape[2]])
+            origins = header['Segmentation_ReferenceImageExtentOffset'].split(' ')
+            orig = [int(x) for x in origins]
+            end = [orig[0] + data.shape[0], orig[1] + data.shape[1]]
+
+            # Put in the ending coordinates
+            data_pad[orig[0]:end[0], orig[1]:end[1], :] = data
+
+            # Return values to data
+            data, data_pad = data_pad, data
 
         return np.squeeze(data.astype(dtype)), header
 
@@ -634,7 +644,7 @@ class SODLoader():
         else: data = raw_data.get_data()
 
         # Return the data
-        return data
+        return np.squeeze(data)
 
 
     def load_MHA(self, path):
