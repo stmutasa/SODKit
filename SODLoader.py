@@ -24,6 +24,7 @@ from scipy.ndimage import binary_fill_holes
 
 import imageio
 from medpy.io import save as mpsave
+import nrrd
 
 import skimage.exposure as hist
 from skimage import morphology
@@ -160,6 +161,34 @@ class SODLoader():
         spacing = np.asarray(image_all.GetSpacing())
 
         return image.astype(dtype), origin, spacing, image.shape
+
+
+    def load_nrrd(self, path, dtype=np.int16, dim3d=True):
+
+        """
+        Loads an NRRD with pynrrd and returns a numpy array
+        :param path: file to load
+        :param dtype: filetype to return
+        :param dim3d: Whether this is 3D or not
+        :return: A numpy array
+        """
+
+        # Read file and return a tuple and header
+        data, header = nrrd.read(path, index_order='C')
+
+        return np.squeeze(data.astype(dtype)), header
+
+
+    def save_nrrd(self, path, data):
+
+        """
+        Saves a numpy array as an nrrd
+        :param path:
+        :param data:
+        :return:
+        """
+
+        nrrd.write(path, data)
 
 
     def load_MAT(self, path):
