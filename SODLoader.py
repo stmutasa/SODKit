@@ -140,7 +140,7 @@ class SODLoader():
         else: return image, numpyOrigin, numpySpacing, dims
 
 
-    def load_nrrd(self, path, dtype=np.int16, pad_shape=None):
+    def load_nrrd(self, path, dtype=np.int16, pad_shape=None, dim3d=True):
 
         """
         Loads an NRRD with pynrrd and returns a numpy array
@@ -148,43 +148,56 @@ class SODLoader():
         :param dtype: filetype to return
         :param pad_shape: NRRD sometimes doesnt save the whole volume (just the segments). And we have to pad it
         If you leave it at none we wont pad, otherwise we will
+        :param dim3d: 3D or 2D
         :return: A numpy array
         """
 
-        # Read file and return a tuple and header
+        # Read file and return a tuple and header: z x,y
         data, header = nrrd.read(path, index_order='C')
 
-        # Convert to numpy array
-        if pad_shape: pad_shape = np.asarray(pad_shape)
+        # Pad the segmentations to fill the volume shape desired, start with 3D mode
+        if pad_shape and dim3d:
 
-        # Pad the segmentations to fill the volume shape desired
-        if pad_shape.any() and data.ndim>2:
-
-            # 3D pad
+            # initiate the new array
+            pad_shape = np.asarray(pad_shape)
             data_pad = np.zeros([pad_shape[0], pad_shape[1], pad_shape[2], data.shape[3]])
+
+            # Get the offset origin  and extent from 3D slicer. This is in XYZ format so reverse
             origins = header['Segmentation_ReferenceImageExtentOffset'].split(' ')
-            orig = [int(x) for x in origins]
+            orig = [int(x) for x in origins] # XYZ
+            orig = orig[::-1]
             end = [orig[0]+data.shape[0], orig[1]+data.shape[1], orig[2]+data.shape[2]]
 
-            # Put in the ending coordinates
+            # Generate the array
             data_pad[orig[0]:end[0], orig[1]:end[1], orig[2]:end[2], :] = data
 
             # Return values to data
             data, data_pad = data_pad, data
 
-        # The 2D version
-        elif pad_shape.any():
+            # Slicer swaps the y and x axes, so return to native numpy form
+            data = np.swapaxes(data, 1, 2)
 
+        # The 2D version
+        elif pad_shape and not dim3d:
+
+            # initiate the new array
+            pad_shape = np.asarray(pad_shape)
             data_pad = np.zeros([pad_shape[0], pad_shape[1], data.shape[2]])
+
+            # Get the offset origin  and extent from 3D slicer. This is in XYZ format so reverse
             origins = header['Segmentation_ReferenceImageExtentOffset'].split(' ')
-            orig = [int(x) for x in origins]
+            orig = [int(x) for x in origins]  # XY
+            orig = orig[::-1]
             end = [orig[0] + data.shape[0], orig[1] + data.shape[1]]
 
-            # Put in the ending coordinates
+            # Generate the array
             data_pad[orig[0]:end[0], orig[1]:end[1], :] = data
 
             # Return values to data
             data, data_pad = data_pad, data
+
+            # Slicer swaps the y and x axes, so return to native numpy form
+            data = np.swapaxes(data, 0, 1)
 
         return np.squeeze(data.astype(dtype)), header
 
