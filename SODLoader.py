@@ -1534,7 +1534,7 @@ class SODLoader():
         """
         Performs a 3D affine rotation and/or shear using OpenCV
         :param image: The image volume
-        :param center: array: the center of rotation (make this the nodule center) in z,y,x
+        :param center: array: the center of rotation in z,y,x
         :param angle_range: array: range of angles about x, y and z
         :param shear_range: float array: the range of values to shear if you want to shear
         :return:
@@ -1608,6 +1608,55 @@ class SODLoader():
         del pts1
 
         return np.subtract(image, img_min), [anglex, angley, anglez], [sx, sy, sz]
+
+
+    def transform_volume_3d(self, image, angles, shift_range=None, center=None, radians=False):
+
+        """
+        Performs a 3D affine rotation and/or shift using OpenCV
+        :param image: The image volume
+        :param center: array: the center of rotation in z,y,x
+        :param angles: array: angle about x, y and z in degrees
+        :param shift_range: for translating
+        :param radians: if the angle is in radians or not
+        :return:
+        """
+
+        if radians: angles = [math.degrees(x) for x in angles]
+
+        # Get center if not given
+        if not center: center = [x//2 for x in image.shape]
+
+        # The image is sent in Z,Y,X format
+        C = None
+        try: Z, Y, X = image.shape
+        except: Z, Y, X, C = image.shape
+
+        # OpenCV makes interpolated pixels equal 0. Add the minumum value to subtract it later
+        img_min = abs(image.min())
+        image = np.add(image, img_min)
+
+        # Define the affine angles of rotation
+        anglex = angles[2]
+        angley = angles[1]
+        anglez = angles[0]
+
+        # Matrix to rotate along Coronal plane (Y columns, Z rows)
+        M = cv2.getRotationMatrix2D((center[1], center[0]), anglex, 1)
+
+        # Apply the Coronal transform slice by slice along X
+        for i in range(0, X): image[:, :, i] = cv2.warpAffine(image[:, :, i], M, (Y, Z))
+
+        # Matrix to rotate along saggital plane (Z and X) and apply
+        M = cv2.getRotationMatrix2D((center[2], center[0]), angley, 1)
+        for i in range(0, Y): image[:, i, :] = cv2.warpAffine(image[:, i, :], M, (X, Z))
+
+        # Matrix to rotate along Axial plane (X and Y)
+        M = cv2.getRotationMatrix2D((center[1], center[2]), anglez, 1)
+        for i in range(0, Z): image[i, :, :] = cv2.warpAffine(image[i, :, :], M, (X, Y))
+
+        # Done with rotation, return if shear is not defined
+        if shift_range == None: return np.subtract(image, img_min)
 
 
     def fast_2d_affine(self, image, center, angle_range, shear_range=None):
@@ -2064,7 +2113,7 @@ class SODLoader():
             else: cn = [int(cn[0]), int(cn[1])]
 
             # Return the parts of the label equal to the 2nd biggest blob
-            return labels, cn
+            return labels, np.asarray(cn, np.float32)
 
         else:
             return img, img.shape//2
