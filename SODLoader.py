@@ -25,6 +25,7 @@ from scipy.ndimage import binary_fill_holes
 import imageio
 from medpy.io import save as mpsave
 import nrrd
+import mclahe as mc
 
 import skimage.exposure as hist
 from skimage import morphology
@@ -2030,33 +2031,6 @@ class SODLoader():
             # Perform the pad
             return np.pad(input, ((ypad, ypad2), (xpad, xpad2)), pad_value)
 
-
-    def normalize_dynamic_range (self, volume, low=0, high=255, mask=None, dtype=np.uint8, dim3d=True):
-        """
-        Takes an input and stretches the pixel values over the given dynamic range
-        :param volume: input volume, numpy array
-        :param low: low range
-        :param high: high range
-        :param mask: If mask defined, only normalize the values in mask
-        :param dtype: output data type desired
-        :param dim3d: True for 3d volumes
-        :return:
-        """
-
-        # Normalize the volume into 0-255 range for .gif file
-        volume_norm = np.zeros_like(volume, dtype=dtype)
-
-        # For volumes
-        if dim3d:
-            for z in range(volume.shape[0]):
-                volume_norm[z] = cv2.normalize(volume[z], dst=volume_norm[z], alpha=low, beta=high, mask=mask, norm_type=cv2.NORM_MINMAX)
-
-        # For 2d images
-        else:
-            volume_norm = cv2.normalize(volume, dst=volume_norm, alpha=low, beta=high, mask=mask, norm_type=cv2.NORM_MINMAX)
-
-        return volume_norm
-
     """
          Utility functions: Random tools for help
     """
@@ -2229,15 +2203,44 @@ class SODLoader():
         else: return image
 
 
-    def adaptive_normalization(self, image):
+    def adaptive_normalization(self, tensor, dim3d=False):
 
         """
         Contrast localized adaptive histogram normalization
-        :param image: ndarray
+        :param tensor: ndarray, 2d or 3d
+        :param dim3d: 2D or 3d. If 2d use Scikit, if 3D use the MCLAHe implementation
         :return: normalized image
         """
 
-        return hist.equalize_adapthist(image)
+        if dim3d: return mc.mclahe(tensor)
+        else: return hist.equalize_adapthist(tensor)
+
+
+    def normalize_dynamic_range (self, volume, low=0, high=255, mask=None, dtype=np.uint8, dim3d=True):
+        """
+        Takes an input and stretches the pixel values over the given dynamic range
+        :param volume: input volume, numpy array
+        :param low: low range
+        :param high: high range
+        :param mask: If mask defined, only normalize the values in mask
+        :param dtype: output data type desired
+        :param dim3d: True for 3d volumes
+        :return:
+        """
+
+        # Normalize the volume into 0-255 range for .gif file
+        volume_norm = np.zeros_like(volume, dtype=dtype)
+
+        # For volumes
+        if dim3d:
+            for z in range(volume.shape[0]):
+                volume_norm[z] = cv2.normalize(volume[z], dst=volume_norm[z], alpha=low, beta=high, mask=mask, norm_type=cv2.NORM_MINMAX)
+
+        # For 2d images
+        else:
+            volume_norm = cv2.normalize(volume, dst=volume_norm, alpha=low, beta=high, mask=mask, norm_type=cv2.NORM_MINMAX)
+
+        return volume_norm
 
 
     def reshape_NHWC(self, vol, NHWC):
