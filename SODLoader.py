@@ -486,16 +486,17 @@ class SODLoader():
         return return_dict
 
 
-    def save_Dict_CSV(self, dict, path):
+    def save_Dict_CSV(self, dict, path, orient='index'):
         """
         Saves a dictionary as a .CSV file
         :param dict: the input dictionary
         :param path: path to save
+        :param orient: Key Orientation, index or columns
         :return:
         """
 
         # Define data frame and create a CSV from it
-        df = pd.DataFrame.from_dict(dict, orient='index')
+        df = pd.DataFrame.from_dict(dict, orient=orient)
         df.to_csv(path)
 
 
