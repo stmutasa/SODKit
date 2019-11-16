@@ -588,7 +588,7 @@ class SODLoader():
                 data[key] = tf.reshape(data[key], shape=data_dims)
                 #data[key] = tf.cast(data[key], tf.float32)
 
-            elif 'str' in value: data[key] = tf.cast(features[key], tf.string)
+            elif 'str' in str(value): data[key] = tf.cast(features[key], tf.string)
             else: data[key] = tf.string_to_number(features[key], tf.float32)
 
         return data
@@ -1020,32 +1020,33 @@ class SODLoader():
         """
 
         # Create the mask
-        mask = np.copy(np.squeeze(image))
+        mask2 = np.copy(np.squeeze(image))
+        mask1 = np.zeros_like(image, np.int16)
 
         # Loop through the image volume
         for k in range(0, image.shape[0]):
 
             # Apply gaussian blur to smooth the image
-            mask[k] = cv2.GaussianBlur(mask[k], (5, 5), 0)
+            mask2[k] = cv2.GaussianBlur(mask2[k], (5, 5), 0)
             # mask[k] = cv2.bilateralFilter(mask[k].astype(np.float32),9,75,75)
 
-            # Threshold the image
-            mask[k] = np.squeeze(mask[k] < threshold)
+            # Threshold the image. Change to the bool
+            mask1[k] = np.squeeze(mask2[k] < threshold).astype(np.int16)
 
             # Define the CV2 structuring element
-            radius_close = np.round(mask.shape[1] / size_denominator).astype('int16')
+            radius_close = np.round(mask1.shape[1] / size_denominator).astype('int16')
             kernel_close = cv2.getStructuringElement(shape=cv2.MORPH_ELLIPSE, ksize=(radius_close, radius_close))
 
             # Apply morph close
-            mask[k] = cv2.morphologyEx(mask[k], cv2.MORPH_CLOSE, kernel_close)
+            mask1[k] = cv2.morphologyEx(mask1[k], cv2.MORPH_CLOSE, kernel_close)
 
             # Invert mask
-            mask[k] = ~mask[k]
+            mask1[k] = ~mask1[k]
 
             # Add 2
-            mask[k] += 2
+            mask1[k] += 2
 
-        return mask
+        return mask1
 
 
     def create_mammo_mask(self, image, threshold=800, check_mask=False):
@@ -2088,7 +2089,7 @@ class SODLoader():
             else: cn = [int(cn[0]), int(cn[1])]
 
             # Return the parts of the label equal to the 2nd biggest blob
-            return labels, np.asarray(cn, np.float32)
+            return labels, np.asarray(cn, np.int32)
 
         else:
             return img, img.shape//2
