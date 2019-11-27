@@ -99,7 +99,6 @@ class SODLoader():
 
             # Delete Patient tags
             if 'OtherPatientIDs' in dataset: delattr(dataset, 'OtherPatientIDs')
-            if 'PatientBirthDate' in dataset: delattr(dataset, 'PatientBirthDate')
             if 'PatientAddress' in dataset: delattr(dataset, 'PatientAddress')
             if 'PatientAge' in dataset: delattr(dataset, 'PatientAge')
             if 'PatientSex' in dataset: delattr(dataset, 'PatientSex')
