@@ -67,6 +67,69 @@ class SODLoader():
      Data Loading Functions. Support for DICOM, Nifty, CSV
     """
 
+    def deID_DICOMs(self, path, delete=True):
+
+        """
+        This function deidentifies every DICOM file within every child directory provided in path
+        :param path: The root directory to start working with
+        :param delete: Whether to delete the original file. Really should always be True unless debugging
+        :return:
+        """
+
+        # Load all the files in all of the subfolders here
+        path = os.path.join(path, '**/*.*')
+        filenames = glob.glob(path, recursive=True)
+
+        for file in filenames:
+
+            # PyDicom will only read dicom files, this is a nice checkpoint for non dicom files
+            try:
+                dataset = dicom.dcmread(file)
+            except:
+                print(file, ' is not a DICOM')
+                continue
+
+            ###############################################################################
+            # pydicom allows to remove private tags using ``remove_private_tags`` method
+
+            dataset.remove_private_tags()
+
+            ###############################################################################
+            # Data elements of type 3 (optional) can be easily deleted using ``del`` or ``delattr``.
+
+            # Delete Patient tags
+            if 'OtherPatientIDs' in dataset: delattr(dataset, 'OtherPatientIDs')
+            if 'PatientBirthDate' in dataset: delattr(dataset, 'PatientBirthDate')
+            if 'PatientAddress' in dataset: delattr(dataset, 'PatientAddress')
+            if 'PatientAge' in dataset: delattr(dataset, 'PatientAge')
+            if 'PatientSex' in dataset: delattr(dataset, 'PatientSex')
+            if 'PatientID' in dataset: delattr(dataset, 'PatientID')
+
+            # Institution tags
+            if 'ReferringPhysicianName' in dataset: delattr(dataset, 'ReferringPhysicianName')
+            if 'InstitutionAddress' in dataset: delattr(dataset, 'InstitutionAddress')
+            if 'InstitutionName' in dataset: delattr(dataset, 'InstitutionName')
+            if 'IssuerOfPatientID' in dataset: delattr(dataset, 'IssuerOfPatientID')
+
+            # Delete the year of acquisition, keep time
+            if 'AcquisitionDate' in dataset: delattr(dataset, 'AcquisitionDate')
+            if 'ContentDate' in dataset: delattr(dataset, 'ContentDate')
+            if 'StudyDate' in dataset: delattr(dataset, 'StudyDate')
+            if 'SeriesDate' in dataset: delattr(dataset, 'SeriesDate')
+
+            # Replace tags that may be used to list patients, use time.time to pick a random number
+            if 'PatientBirthDate' in dataset: dataset.data_element('PatientBirthDate').value = time.asctime(time.gmtime())
+            if 'PatientName' in dataset: dataset.data_element('PatientName').value = 'De Identified_' + str(time.time())[-6:]
+
+            ##############################################################################
+            # Finally, save the file again
+
+            # Delete the original
+            if delete: os.remove(file)
+
+            # Save this new one
+            dataset.save_as(file)
+
 
     def load_DICOM_3D(self, path, dtype=np.int16, sort=False, overwrite_dims=513, display=False, return_header=False):
 
@@ -294,7 +357,10 @@ class SODLoader():
             image += dtype(intercept)
         except: pass
 
-        return image, accno, dims, window, photometric
+        # --- Save first slice for header information
+        header = {'fname': path, 'tags': ndimage[0]}
+
+        return image, accno, window, photometric, header
 
 
     def _load_DICOM_ITK(self, path):
