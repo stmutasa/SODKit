@@ -7,7 +7,7 @@ It then contains functions to store the file as a protocol buffer
 
 """
 
-import glob, os, csv, random, cv2, math, pickle
+import glob, os, csv, random, cv2, math, pickle, time
 #import mudicom, astra
 
 import numpy as np
@@ -118,7 +118,11 @@ class SODLoader():
             if 'SeriesDate' in dataset: delattr(dataset, 'SeriesDate')
 
             # Replace tags that may be used to list patients, use time.time to pick a random number
-            if 'PatientBirthDate' in dataset: dataset.data_element('PatientBirthDate').value = time.asctime(time.gmtime())
+            strings = time.strftime("%Y,%m,%d")
+            t = strings.split(',')
+            z = ''
+            bdate = z.join(t)
+            if 'PatientBirthDate' in dataset: dataset.data_element('PatientBirthDate').value = bdate
             if 'PatientName' in dataset: dataset.data_element('PatientName').value = 'De Identified_' + str(time.time())[-6:]
 
             ##############################################################################
