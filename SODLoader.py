@@ -35,6 +35,15 @@ from skimage.morphology import disk
 from skimage.segmentation import felzenszwalb
 from skimage.transform import rescale
 
+# Encryption imports
+import secrets
+from base64 import urlsafe_b64encode as b64e, urlsafe_b64decode as b64d
+
+from cryptography.fernet import Fernet
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
 class SODLoader():
 
     """
@@ -67,11 +76,13 @@ class SODLoader():
      Data Loading Functions. Support for DICOM, Nifty, CSV
     """
 
-    def deID_DICOMs(self, path, delete=True):
+
+    def deID_DICOMs(self, path, password, delete=True):
 
         """
         This function deidentifies every DICOM file within every child directory provided in path
         :param path: The root directory to start working with
+        :param password: A password to create an encrypted key of the pt data
         :param delete: Whether to delete the original file. Really should always be True unless debugging
         :return:
         """
@@ -97,6 +108,13 @@ class SODLoader():
             ###############################################################################
             # Data elements of type 3 (optional) can be easily deleted using ``del`` or ``delattr``.
 
+            # Get the ACCno
+            accno = dataset.AccessionNumber
+            keystring = accno + dataset.PatientSex + dataset.PatientAge + '_' + dataset.PatientID
+
+            # Create an encrypted Accno
+            encrypted_accno = self.password_encrypt(keystring, password, return_string=True)
+
             # Delete Patient tags
             if 'OtherPatientIDs' in dataset: delattr(dataset, 'OtherPatientIDs')
             if 'PatientAddress' in dataset: delattr(dataset, 'PatientAddress')
@@ -120,9 +138,12 @@ class SODLoader():
             strings = time.strftime("%Y,%m,%d")
             t = strings.split(',')
             z = ''
-            bdate = z.join(t)
+            bdate = accno[:4] + z.join(t)[-4:]
+            accno2 = z.join(t)[:4] + accno[-4:]
             if 'PatientBirthDate' in dataset: dataset.data_element('PatientBirthDate').value = bdate
             if 'PatientName' in dataset: dataset.data_element('PatientName').value = 'De Identified_' + str(time.time())[-6:]
+            if 'AccessionNumber' in dataset: dataset.data_element('AccessionNumber').value = accno2
+            if 'StudyID' in dataset: dataset.data_element('StudyID').value = encrypted_accno
 
             ##############################################################################
             # Finally, save the file again
@@ -132,6 +153,48 @@ class SODLoader():
 
             # Save this new one
             dataset.save_as(file)
+
+
+    def ReID_DICOMs(self, password, file):
+
+        """
+        Function that returns a patient's accession number, MRN, gender, and date of birth
+        This only works on files deidentified by the DeID_DICOMs function
+        :param password: The password used to generate the key when the dicom was saved
+        :param file: DICOM file to use to id this patient, one file per accession
+        :return: {'MRN', 'Accession', 'Sex', 'Age'}
+        """
+
+        # PyDicom will only read dicom files, this is a nice checkpoint for non dicom files
+        try:
+            dataset = dicom.dcmread(file)
+        except:
+            print(file, ' is not a DICOM')
+            return None
+
+        # Return the information
+        encrypted_info = dataset.StudyID
+        try:
+            decrypted_info = self.password_decrypt(encrypted_info, password, return_string=True)
+        except:
+            print('Password %s is incorrect!' % password)
+            return None
+
+        # Decypher
+        MRN = decrypted_info.split('_')[-1]
+        if 'F' in decrypted_info:
+            Accno = decrypted_info.split('F')[0]
+            Sex = 'F'
+            Age = decrypted_info.split('F')[1].split('_')[0]
+        else:
+            Sex = 'M'
+            Accno = decrypted_info.split('M')[0]
+            Age = decrypted_info.split('M')[1].split('_')[0]
+
+        # --- Save first slice for header information
+        header = {'MRN': MRN, 'Accession': Accno, 'Sex': Sex, 'Age': Age}
+
+        return header
 
 
     def load_DICOM_3D(self, path, dtype=np.int16, sort=False, overwrite_dims=513, display=False, return_header=False):
@@ -2621,6 +2684,41 @@ class SODLoader():
     """
          Tool functions: Most of these are hidden
     """
+
+    def _derive_key(self, password: bytes, salt: bytes, iterations: int = 100_000) -> bytes:
+        """Derive a secret key from a given password and salt"""
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(), length=32, salt=salt,
+            iterations=iterations, backend=default_backend())
+        return b64e(kdf.derive(password))
+
+    def password_encrypt(self, message: bytes, password: str, iterations: int = 100_000, return_string=False) -> bytes:
+        salt = secrets.token_bytes(16)
+        key = self._derive_key(password.encode(), salt, iterations)
+        message = message.encode('utf-8')
+        ret = b64e(
+            b'%b%b%b' % (
+                salt,
+                iterations.to_bytes(4, 'big'),
+                b64d(Fernet(key).encrypt(message)),
+            )
+        )
+        if return_string:
+            return ret.decode('utf-8')
+        else:
+            return ret
+
+    def password_decrypt(self, token: bytes, password: str, return_string=False) -> bytes:
+        decoded = b64d(token)
+        salt, iter, token = decoded[:16], decoded[16:20], b64e(decoded[20:])
+        iterations = int.from_bytes(iter, 'big')
+        key = self._derive_key(password.encode(), salt, iterations)
+        ret = Fernet(key).decrypt(token)
+        if return_string:
+            return ret.decode('utf-8')
+        else:
+            return ret
+
 
     def _int64_feature(self, value):
         return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
