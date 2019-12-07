@@ -112,7 +112,11 @@ class SODLoader():
             ###############################################################################
             # pydicom allows to remove private tags using ``remove_private_tags`` method
 
-            dataset.remove_private_tags()
+            try:
+                dataset.remove_private_tags()
+            except:
+                print('Private tag error with ', file)
+                continue
 
             ###############################################################################
             # Data elements of type 3 (optional) can be easily deleted using ``del`` or ``delattr``
