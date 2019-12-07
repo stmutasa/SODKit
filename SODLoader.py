@@ -121,9 +121,15 @@ class SODLoader():
             ###############################################################################
             # Data elements of type 3 (optional) can be easily deleted using ``del`` or ``delattr``
 
+            # Someteimes age at exam is not listed
+            try:
+                age = dataset.PatientAge
+            except:
+                age = str(int(dataset.StudyDate[:4]) - int(dataset.PatientBirthDate[:4]))
+
             # Get the ACCno
             accno = dataset.AccessionNumber
-            keystring = accno + dataset.PatientSex + dataset.PatientAge + '_' + dataset.PatientID
+            keystring = accno + dataset.PatientSex + age + '_' + dataset.PatientID
 
             # Create an encrypted Accno
             encrypted_accno = self.password_encrypt(keystring, password, return_string=True)
@@ -167,7 +173,8 @@ class SODLoader():
             # Save this new one
             dataset.save_as(file)
 
-            if index % (len(filenames) // 10) == 0: print('De-Identified %s of %s files' % (index, len(filenames)))
+            if index % (len(filenames) // 10) == 0: print('*' * 20,
+                                                          '\nDe-Identified %s of %s files' % (index, len(filenames)))
             index += 1
             del dataset, accno, keystring, encrypted_accno, accno2, bdate
 
