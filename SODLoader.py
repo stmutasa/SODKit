@@ -156,8 +156,9 @@ class SODLoader():
             # Save this new one
             dataset.save_as(file)
 
-            if index % (len(filenames) // 10) == 0: print('De-Identified %s of %s files')
+            if index % (len(filenames) // 10) == 0: print('De-Identified %s of %s files' % (index, len(filenames)))
             index += 1
+            del dataset, accno, keystring, encrypted_accno, accno2, bdate
 
 
     def ReID_DICOMs(self, password, file):
