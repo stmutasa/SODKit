@@ -92,6 +92,7 @@ class SODLoader():
         filenames = glob.glob(path, recursive=True)
         print('De-Identifying %s files... from root: ' % len(filenames), path)
 
+        index = 0
         for file in filenames:
 
             # PyDicom will only read dicom files, this is a nice checkpoint for non dicom files
@@ -154,6 +155,9 @@ class SODLoader():
 
             # Save this new one
             dataset.save_as(file)
+
+            if index % (len(filenames) // 10) == 0: print('De-Identified %s of %s files')
+            index += 1
 
 
     def ReID_DICOMs(self, password, file):
