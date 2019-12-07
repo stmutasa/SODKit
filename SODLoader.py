@@ -102,13 +102,20 @@ class SODLoader():
                 print(file, ' is not a DICOM')
                 continue
 
+            # Patient sex is always there, if not, use this as a proxy that this patient has already been done
+            try:
+                _ = dataset.PatientSex
+            except:
+                print('Already deidentified %s' % file)
+                continue
+
             ###############################################################################
             # pydicom allows to remove private tags using ``remove_private_tags`` method
 
             dataset.remove_private_tags()
 
             ###############################################################################
-            # Data elements of type 3 (optional) can be easily deleted using ``del`` or ``delattr``.
+            # Data elements of type 3 (optional) can be easily deleted using ``del`` or ``delattr``
 
             # Get the ACCno
             accno = dataset.AccessionNumber
