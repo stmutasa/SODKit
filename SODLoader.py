@@ -90,6 +90,7 @@ class SODLoader():
         # Load all the files in all of the subfolders here
         path = os.path.join(path, '**/*.*')
         filenames = glob.glob(path, recursive=True)
+        print('De-Identifying %s files... from root: ' % len(filenames), path)
 
         for file in filenames:
 
