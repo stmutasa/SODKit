@@ -1006,7 +1006,7 @@ class SODLoader():
         if swapaxes: volume = np.swapaxes(volume, 1, 2)
 
         try: volume_norm = self.adaptive_normalization(volume, True)
-        except: pass
+        except: volume_norm = volume
         volume_norm = cv2.convertScaleAbs(volume_norm, alpha=(255.0 / volume_norm.max()))
 
         # Save the .gif set FPS to volume depended
