@@ -92,6 +92,9 @@ class SODLoader():
         filenames = glob.glob(path, recursive=True)
         print('De-Identifying %s files... from root: ' % len(filenames), path)
 
+        # remove nifti and nrrd files
+        filenames = [x for x in filenames if 'nii' not in x or 'nrrd' not in x]
+
         index = 0
         for file in filenames:
 
@@ -448,7 +451,7 @@ class SODLoader():
         except: pass
 
         # --- Save first slice for header information
-        header = {'fname': path, 'tags': ndimage[0]}
+        header = {'fname': path, 'tags': ndimage}
 
         return image, accno, window, photometric, header
 
@@ -742,22 +745,84 @@ class SODLoader():
             elif 'data' in key:
                 data[key] = tf.decode_raw(features[key], image_dtype)
                 data[key] = tf.reshape(data[key], shape=data_dims)
-                #data[key] = tf.cast(data[key], tf.float32)
+                # data[key] = tf.cast(data[key], tf.float32)
 
-            elif 'str' in str(value): data[key] = tf.cast(features[key], tf.string)
-            else: data[key] = tf.string_to_number(features[key], tf.float32)
+            elif 'str' in str(value):
+                data[key] = tf.cast(features[key], tf.string)
+            else:
+                data[key] = tf.string_to_number(features[key], tf.float32)
 
         return data
 
+    def load_tfrecord_labels(self, dataset, segments='label_data'):
+
+        """
+        Function to load a tfrecord labels only, not the images. Useful when we want to split this up
+        """
+
+        # Pickle load
+        loaded_dict = self.load_dict_pickle()
+
+        # Populate the feature dict
+        feature_dict = {'id': tf.FixedLenFeature([], tf.int64)}
+        for key, value in loaded_dict.items(): feature_dict[key] = tf.FixedLenFeature([], tf.string)
+
+        # Parses one protocol buffer file into the features dictionary which maps keys to tensors with the data: 'key': parse_single_eg
+        features = tf.parse_single_example(dataset, features=feature_dict)
+
+        # Make a data dictionary and cast it to floats
+        data = {'id': tf.cast(features['id'], tf.float32)}
+        for key, value in loaded_dict.items():
+
+            # Depending on the type key or entry value, use a different cast function on the feature
+            if 'bbox' in key:
+                data[key] = tf.decode_raw(features[key], tf.float32)
+                data[key] = tf.reshape(data[key], shape=[-1, 5])
+
+            elif segments in key:
+                data[key] = features[key]
+
+            elif 'data' in key:
+                data[key] = features[key]
+
+            elif 'str' in str(value):
+                data[key] = tf.cast(features[key], tf.string)
+            else:
+                data[key] = tf.string_to_number(features[key], tf.float32)
+
+        return data
+
+    def load_tfrecord_images(self, dataset, data_dims=[], image_dtype=tf.float32, segments='label_data',
+                             segments_dtype=tf.float32, segments_shape=[]):
+
+        """
+        Function to load a tfrecords images only. Useful when we want to split this up
+        """
+
+        for key, value in dataset.items():
+
+            # Depending on the type key or entry value, use a different cast function on the feature
+            if segments in key:
+                dataset[key] = tf.decode_raw(value, segments_dtype)
+                dataset[key] = tf.reshape(dataset[key], shape=segments_shape)
+
+            elif 'data' in key:
+                dataset[key] = tf.decode_raw(value, image_dtype)
+                dataset[key] = tf.reshape(dataset[key], shape=data_dims)
+
+            else:
+                continue
+
+        return dataset
 
     def load_tfrecords_dataset(self, filenames):
-
 
         # now load the remaining files
         filename_queue = tf.train.string_input_producer(filenames, num_epochs=None)
 
         reader = tf.TFRecordReader()  # Instantializes a TFRecordReader which outputs records from a TFRecords file
-        _, serialized_example = reader.read(filename_queue)  # Returns the next record (key:value) produced by the reader
+        _, serialized_example = reader.read(
+            filename_queue)  # Returns the next record (key:value) produced by the reader
 
         # Pickle load
         loaded_dict = self.load_dict_pickle()
@@ -796,6 +861,69 @@ class SODLoader():
         #
         # return data
 
+    def oversample_class(self, example_class, actual_dists=[0.5, 0.5], desired_dists=[], oversampling_coef=0.9):
+
+        """
+            Calculates how many copies to make of each class in order to oversample some classes
+            class_dist is an array with the actual distribution of each class
+            class_target_dist is an array with the target distribution of each class, defaults to equal
+            oversampling_coef smooths the calculation if equal to 0 then oversample_classes() always returns 1
+            returns an int64
+        """
+
+        # Get this classes distributions
+        if not desired_dists: desired_dists = [1 / len(actual_dists)] * len(actual_dists)
+        desired_dists = tf.cast(desired_dists, dtype=tf.float32)
+        actual_dists = tf.cast(actual_dists, dtype=tf.float32)
+
+        class_target_dist = tf.squeeze(desired_dists[tf.cast(example_class, tf.int32)])
+        class_dist = tf.squeeze(actual_dists[tf.cast(example_class, tf.int32)])
+
+        # Get a ratio between these two. If overrepresented, this returns <1 else >1
+        prob_ratio = tf.cast(class_target_dist / class_dist, dtype=tf.float32)
+
+        # Factor to soften the chance of generating repeats, if oversampling_coef==0 we recover original distribution
+        prob_ratio = prob_ratio ** oversampling_coef
+
+        # For oversampled classes (low ratio) we # want to return 1. Otherwise save as int with math.floor
+        prob_ratio = tf.math.maximum(prob_ratio, 1)
+        repeat_count = tf.math.floor(prob_ratio)
+
+        # To handle floats, there is a chance to return a higher integer than the floor above.
+        # i.e. prob_ratio 1.9 returns 2 instead of 1 90% of the time
+        repeat_residual = prob_ratio - repeat_count
+        residual_acceptance = tf.math.less_equal(tf.random_uniform([], dtype=tf.float32), repeat_residual)
+
+        # Convert to integers and return
+        residual_acceptance = tf.cast(residual_acceptance, tf.int64)
+        repeat_count = tf.cast(repeat_count, dtype=tf.int64)
+        return repeat_count + residual_acceptance
+
+    def undersample_filter(self, example_class, actual_dists=[0.5, 0.5], desired_dists=[], undersampling_coef=0.5):
+
+        """
+        Lets you know if you should reject this sample or not
+        Must have a 'class_dist' index indicating the actual class frequency 0-1
+        Must have 'class_target_dist' index indicating the desired frequency 0-1
+        undersampling_coef if equal to 0 then undersampling_filter() always returns True
+        returns true or false
+        """
+
+        # Get this classes distributions
+        if not desired_dists: desired_dists = [1 / len(actual_dists)] * len(actual_dists)
+        desired_dists = tf.cast(desired_dists, dtype=tf.float32)
+        actual_dists = tf.cast(actual_dists, dtype=tf.float32)
+
+        class_target_dist = tf.squeeze(desired_dists[tf.cast(example_class, tf.int32)])
+        class_dist = tf.squeeze(actual_dists[tf.cast(example_class, tf.int32)])
+
+        prob_ratio = tf.cast(class_target_dist / class_dist, dtype=tf.float32)
+        prob_ratio = prob_ratio ** undersampling_coef
+        prob_ratio = tf.minimum(prob_ratio, 1.0)
+
+        acceptance = tf.less_equal(tf.random_uniform([], dtype=tf.float32), prob_ratio)
+        # predicate must return a scalar boolean tensor
+        return acceptance
 
     def load_NIFTY(self, path, reshape=True):
         """
