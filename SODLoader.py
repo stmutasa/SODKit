@@ -274,7 +274,7 @@ class SODLoader():
 
         # --- Save first slice for header information
         header = {'orientation': orientation, 'slices': shape[1], 'channels': shape[0],
-                  'fnames': fnames, 'tags': ndimage[0], '4d': four_d}
+                  'fnames': fnames, 'tags': ndimage[0], '4d': four_d, 'spacing': numpySpacing, 'origin': numpyOrigin}
 
         # Finally, make the image actually equal to the pixel data and not the header
         try: image = np.stack([self.read_dcm_uncompressed(s) for s in ndimage])
@@ -295,9 +295,37 @@ class SODLoader():
                 image[slice_number] = image[slice_number].astype('int16')
                 image[slice_number] += np.int16(intercept)
 
-        if return_header: return image, header
-        else: return image, numpyOrigin, numpySpacing, dims
+        if return_header:
+            return image, header
+        else:
+            return image, numpyOrigin, numpySpacing, dims
 
+    def load_DICOM_Header(self, path, multiple=True):
+
+        """
+        This function loads a DICOM folder and stores it into a numpy array. From Kaggle
+        :param: path: The path of the DICOM folder
+        :param multiple: Whether the path contains single or multiple files of the same accno
+        :return header: a dictionary of the file's header information
+        """
+
+        # For now just return accession number of the first file
+
+        # Some DICOMs end in .dcm, others do not
+        fnames = list()
+        for (dirpath, dirnames, filenames) in os.walk(path):
+            fnames += [os.path.join(dirpath, file) for file in filenames]
+
+        # Sort the slices
+        try:
+            ndimage = dicom.read_file(fnames[0])
+        except:
+            ndimage = dicom.read_file(fnames[1])
+
+        # --- Save first slice for header information
+        header = {'fname': fnames[0], 'tags': ndimage, 'path': path}
+
+        return header
 
     def load_nrrd(self, path, dtype=np.int16, pad_shape=None, dim3d=True):
 

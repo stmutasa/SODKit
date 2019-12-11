@@ -618,13 +618,14 @@ class SOD_Display(SODLoader):
         self.display_single_image(overlay, plot, title=title)
 
 
-    def display_whole_vol_overlay(self, volume, segments, plot=False):
+    def display_whole_vol_overlay(self, volume, segments, plot=False, ret=False):
 
         """
         Shortcut to display a whole volume overla
         :param volume: Input 3D volume numpy array. any type
         :param segments: Input 3D segments numpy array any type
         :param plot: Whether to plot and show the result right away
+        :param return: whether to return the overlay
         :return:
         """
 
@@ -635,14 +636,14 @@ class SOD_Display(SODLoader):
         overlay = np.zeros([vol.shape[0], vol.shape[1], vol.shape[2], 3], np.float32)
 
         # Loop through all the slices
-        for z in range (vol.shape[0]):
-
+        for z in range(vol.shape[0]):
             # Retreive the overlaid image
             overlay[z] = self.return_image_overlay(vol[z], segs[z])
 
         # Display the overlay
         self.display_volume(overlay, plot)
 
+        if ret: return overlay
 
     def display_breast_mask(self, im, mask):
 
