@@ -35,6 +35,8 @@ from skimage.morphology import disk
 from skimage.segmentation import felzenszwalb
 from skimage.transform import rescale
 
+from moviepy.editor import ImageSequenceClip
+
 # Encryption imports
 import secrets
 from base64 import urlsafe_b64encode as b64e, urlsafe_b64decode as b64d
@@ -242,9 +244,9 @@ class SODLoader():
         """
 
         # Some DICOMs end in .dcm, others do not
-        # if path[-3:] != 'dcm': fnames = [path + '/' + s for s in os.listdir(path) if s[-3:].lower() == 'dcm']
-        # else: fnames = [path]
-        fnames = self.retreive_filelist('**', True, path)
+        fnames = list()
+        for (dirpath, dirnames, filenames) in os.walk(path):
+            fnames += [os.path.join(dirpath, file) for file in filenames]
 
         # Sort the slices
         ndimage = [dicom.read_file(path, force=True) for path in fnames]
@@ -293,7 +295,7 @@ class SODLoader():
                 image[slice_number] = image[slice_number].astype('int16')
                 image[slice_number] += np.int16(intercept)
 
-        if return_header: return image, numpyOrigin, numpySpacing, dims, header
+        if return_header: return image, header
         else: return image, numpyOrigin, numpySpacing, dims
 
 
@@ -1120,6 +1122,60 @@ class SODLoader():
 
         # Way more powerful than this but we will go on a PRN basis
         imageio.imwrite(path, image, format=format)
+
+
+    def save_gif_volume(self, volume, path, fps=None, scale=0.8, swapaxes=False):
+
+        """
+        Saves the input volume to a .gif file
+        """
+
+        # Swapaxes, used if this is a nifti source
+        if swapaxes: volume = np.swapaxes(volume, 1, 2)
+
+        try: volume_norm = self.adaptive_normalization(volume, True)
+        except: volume_norm = volume
+        volume_norm = cv2.convertScaleAbs(volume_norm, alpha=(255.0 / volume_norm.max()))
+
+        # Save the .gif set FPS to volume depended
+        if not fps: fps = volume_norm.shape[0] // 5
+        self.gif(path, volume_norm, fps=fps, scale=scale)
+
+
+    def gif(self, filename, array, fps=10, scale=1.0):
+        """Creates a gif given a stack of images using moviepy
+        Notes
+        -----
+        works with current Github version of moviepy (not the pip version)
+        https://github.com/Zulko/moviepy/commit/d4c9c37bc88261d8ed8b5d9b7c317d13b2cdf62e
+        Usage
+        -----
+        >>> X = randn(100, 64, 64)
+        >>> gif('test.gif', X)
+        Parameters
+        ----------
+        filename : string
+            The filename of the gif to write to
+        array : array_like
+            A numpy array that contains a sequence of images
+        fps : int
+            frames per second (default: 10)
+        scale : float
+            how much to rescale each image by (default: 1.0)
+        """
+
+        # ensure that the file has the .gif extension
+        fname, _ = os.path.splitext(filename)
+        filename = fname + '.gif'
+
+        # copy into the color dimension if the images are black and white
+        if array.ndim == 3:
+            array = array[..., np.newaxis] * np.ones(3)
+
+        # make the moviepy clip
+        clip = ImageSequenceClip(list(array), fps=fps).resize(scale)
+        clip.write_gif(filename, fps=fps)
+        return clip
 
 
     def save_volume(self, volume, path, header=False, overwrite=True, compress=False):
