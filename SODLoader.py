@@ -1152,7 +1152,7 @@ class SODLoader():
         imageio.imwrite(path, image, format=format)
 
 
-    def save_gif_volume(self, volume, path, fps=None, scale=0.8, swapaxes=False):
+    def save_gif_volume(self, volume, path, fps=None, scale=0.8, swapaxes=False, norm=True):
 
         """
         Saves the input volume to a .gif file
@@ -1161,9 +1161,14 @@ class SODLoader():
         # Swapaxes, used if this is a nifti source
         if swapaxes: volume = np.swapaxes(volume, 1, 2)
 
-        try: volume_norm = self.adaptive_normalization(volume, True)
-        except: volume_norm = volume
-        volume_norm = cv2.convertScaleAbs(volume_norm, alpha=(255.0 / volume_norm.max()))
+        if norm:
+            try:
+                volume_norm = self.adaptive_normalization(volume, True)
+            except:
+                volume_norm = volume
+            volume_norm = cv2.convertScaleAbs(volume_norm, alpha=(255.0 / volume_norm.max()))
+        else:
+            volume_norm = cv2.convertScaleAbs(volume, alpha=(255.0))
 
         # Save the .gif set FPS to volume depended
         if not fps: fps = volume_norm.shape[0] // 5

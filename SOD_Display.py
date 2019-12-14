@@ -542,13 +542,36 @@ class SOD_Display(SODLoader):
             rgb = [[1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 1, 1], [1, 0, 1], [1, 1, 0]]
             overlay = []
             for channel in range(3):
-                layer = img[:,:,channel]
+                layer = img[:, :, channel]
                 for i in range(mask.shape[0]):
-                    layer[mask[i, :,:]] = rgb[i % 6][channel]
+                    layer[mask[i, :, :]] = rgb[i % 6][channel]
                 layer = np.expand_dims(layer, 2)
                 overlay.append(layer)
             return np.concatenate(tuple(overlay), axis=2)
 
+    def return_heatmap_overlay(self, image, heatmap, alpha=0.7, beta=0.99):
+
+        """
+        Applies a 2D heatmap to a 2D image
+        """
+
+        # Apply the image color maps
+        cmap = plt.get_cmap('jet')
+        heat_rgba = cmap(heatmap).astype(np.float32)
+        img_rgba = cv2.cvtColor(image, cv2.COLOR_GRAY2RGBA)
+
+        # apply alpha_map map to the heatmap
+        heat_rgba[:, :, 3] = heatmap
+
+        # Blend images, to prevent blue, multiply blue channel by orig heatmap to make background 0
+        blue_mask = heatmap[heatmap >= 0.1]
+        try:
+            heat_rgba[:, :, 2] *= blue_mask
+        except:
+            heat_rgba[:, :, 2] *= 0
+        blend2 = heat_rgba + img_rgba
+
+        return blend2
 
     def return_shape_overlay(self, img, coordinates, color=0.5, shape='BOX'):
 
