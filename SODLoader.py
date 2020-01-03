@@ -248,8 +248,15 @@ class SODLoader():
         for (dirpath, dirnames, filenames) in os.walk(path):
             fnames += [os.path.join(dirpath, file) for file in filenames]
 
-        # Sort the slices
+        # Load the dicoms
         ndimage = [dicom.read_file(path, force=True) for path in fnames]
+
+        # Calculate how many volumes are interleaved here
+        sort_list = np.asarray([x.SliceLocation for x in ndimage], np.int16)
+        _, counts = np.unique(sort_list, return_counts=True)
+        repeats = np.max(counts)
+
+        # Sort teh slices
         if sort:
             if 'Lung' in sort: ndimage = self.sort_DICOMS_Lung(ndimage, display, path)
             elif 'PE' in sort: ndimage = self.sort_DICOMS_PE(ndimage, display, path)
@@ -273,7 +280,7 @@ class SODLoader():
         numpyOrigin = np.array([float(orig[2]), float(orig[0]), float(orig[1])])
 
         # --- Save first slice for header information
-        header = {'orientation': orientation, 'slices': shape[1], 'channels': shape[0],
+        header = {'orientation': orientation, 'slices': shape[1], 'channels': shape[0], 'num_Interleaved': repeats,
                   'fnames': fnames, 'tags': ndimage[0], '4d': four_d, 'spacing': numpySpacing, 'origin': numpyOrigin}
 
         # Finally, make the image actually equal to the pixel data and not the header
