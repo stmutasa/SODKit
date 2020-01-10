@@ -283,9 +283,9 @@ class SODLoader():
         header = {'orientation': orientation, 'slices': shape[1], 'channels': shape[0], 'num_Interleaved': repeats,
                   'fnames': fnames, 'tags': ndimage[0], '4d': four_d, 'spacing': numpySpacing, 'origin': numpyOrigin}
 
-        # Finally, make the image actually equal to the pixel data and not the header
+        # Finally, load pixel data. You can use Imageio here
         try: image = np.stack([self.read_dcm_uncompressed(s) for s in ndimage])
-        except: image = np.stack([self.read_dcm_compressed(f) for f in fnames])
+        except: image = imageio.volread(path, 'DICOM')
 
         image = self.compress_bits(image)
 
