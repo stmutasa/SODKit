@@ -307,6 +307,7 @@ class SODLoader():
         else:
             return image, numpyOrigin, numpySpacing, dims
 
+
     def load_DICOM_Header(self, path, multiple=True):
 
         """
@@ -317,20 +318,29 @@ class SODLoader():
         """
 
         # For now just return accession number of the first file
+        if multiple:
 
-        # Some DICOMs end in .dcm, others do not
-        fnames = list()
-        for (dirpath, dirnames, filenames) in os.walk(path):
-            fnames += [os.path.join(dirpath, file) for file in filenames]
+            # Some DICOMs end in .dcm, others do not
+            fnames = list()
+            for (dirpath, dirnames, filenames) in os.walk(path):
+                fnames += [os.path.join(dirpath, file) for file in filenames]
 
-        # Sort the slices
-        try:
-            ndimage = dicom.read_file(fnames[0])
-        except:
-            ndimage = dicom.read_file(fnames[1])
+            # Sort the slices
+            try:
+                ndimage = dicom.read_file(fnames[0])
+            except:
+                ndimage = dicom.read_file(fnames[1])
 
-        # --- Save first slice for header information
-        header = {'fname': fnames[0], 'tags': ndimage, 'path': path}
+            # --- Save first slice for header information
+            header = {'fname': fnames[0], 'tags': ndimage, 'path': path}
+
+        else:
+
+            # Load the Dicom
+            ndimage = dicom.read_file(path)
+
+            # --- Save first slice for header information
+            header = {'fname': path, 'tags': ndimage}
 
         return header
 
