@@ -45,7 +45,7 @@ class SODTester():
         self.TP, self.FP, self.TN, self.FN = 0, 0, 0, 0
         self.sensitiviy, self.specificity = 0, 0
         self.PPV, self.NPV = 0, 0
-        self.F1_score, self.AUC = 0, 0
+        self.F1_score, self.MAE = 0, 0
         self.roc_auc, self.fpr, self.tpr = {}, {}, {}
 
         # Other variables
@@ -78,7 +78,7 @@ class SODTester():
         MAE = np.mean(np.absolute((predictions - label)))
 
         # Print the summary
-        np.set_printoptions(precision=1)  # use numpy to print only the first sig fig
+        np.set_printoptions(precision=3)  # use numpy to print only the first sig fig
         if display: print('MAE: %s\n Pred: %s\nReal: %s' % (MAE, predictions[:to_print], label[:to_print]))
 
         # Append right

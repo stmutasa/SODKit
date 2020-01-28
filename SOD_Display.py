@@ -199,6 +199,10 @@ class SOD_Display(SODLoader):
         :return:
         """
 
+        # If grayscale, add color
+        if img.ndim == 2:
+            img = np.expand_dims(img, -1)
+
         # Add a grayscale value to the image TODO: Was in color
         img = img + np.array([116.779])
         boxes = boxes.astype(np.int64)
@@ -207,7 +211,7 @@ class SOD_Display(SODLoader):
         img = np.array(img * 255 / np.max(img), np.uint8)
 
         # Loop through boxes we need to draw. If only one box, don't loop
-        if boxes.ndim==1:
+        if boxes.ndim == 1:
 
             # Retreive coordinates and a random color
             xmin, ymin, xmax, ymax = boxes[0], boxes[1], boxes[0] + boxes[2], boxes[1] + boxes[3]
