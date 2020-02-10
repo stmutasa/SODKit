@@ -839,6 +839,7 @@ class SODLoader():
 
         return data
 
+
     def load_tfrecord_images(self, dataset, data_dims=[], image_dtype=tf.float32, segments='label_data',
                              segments_dtype=tf.float32, segments_shape=[]):
 
@@ -861,6 +862,7 @@ class SODLoader():
                 continue
 
         return dataset
+
 
     def load_tfrecords_dataset(self, filenames):
 
@@ -1582,7 +1584,12 @@ class SODLoader():
             im_mask = ~im_mask
 
         # exclude thresholded area (artifacts) in mask, too
-        im_mask[im > threshold] = False
+        try:
+            im_mask[im > threshold] = False
+        except:
+            # Sometimes it fails because the axes are different
+            im_mask = np.swapaxes(im_mask, 0, 1)
+            im_mask[im > threshold] = False
 
         # fill holes again, just in case there was a high-intensity region
         # in the breast
@@ -1920,7 +1927,9 @@ class SODLoader():
         :param new_shape: New shape, tuple or array
         :return: the resized image
         """
-        return cv2.resize(image,(new_shape[0], new_shape[1]), interpolation = cv2.INTER_CUBIC)
+
+        # OpenCV reverses X and Y axes
+        return cv2.resize(image, (new_shape[1], new_shape[0]), interpolation=cv2.INTER_CUBIC)
 
 
     def fast_3d_affine(self, image, center, angle_range, shear_range=None):
