@@ -801,7 +801,7 @@ class SODLoader():
 
         return data
 
-    def load_tfrecord_labels(self, dataset, segments='label_data'):
+    def load_tfrecord_labels(self, dataset, segments='', segments_dtype=tf.float32, segments_shape=[]):
 
         """
         Function to load a tfrecord labels only, not the images. Useful when we want to split this up
@@ -827,7 +827,8 @@ class SODLoader():
                 data[key] = tf.reshape(data[key], shape=[-1, 5])
 
             elif segments in key:
-                data[key] = features[key]
+                data[key] = tf.decode_raw(value, segments_dtype)
+                data[key] = tf.reshape(data[key], shape=segments_shape)
 
             elif 'data' in key:
                 data[key] = features[key]
@@ -854,7 +855,7 @@ class SODLoader():
                 dataset[key] = tf.decode_raw(value, segments_dtype)
                 dataset[key] = tf.reshape(dataset[key], shape=segments_shape)
 
-            elif 'data' in key:
+            elif key == 'data':
                 dataset[key] = tf.decode_raw(value, image_dtype)
                 dataset[key] = tf.reshape(dataset[key], shape=data_dims)
 
@@ -884,31 +885,6 @@ class SODLoader():
         features = tf.parse_single_example(serialized_example, features=feature_dict)
 
         return features
-
-        # # Make a data dictionary and cast it to floats
-        # data = {'id': tf.cast(features['id'], tf.float32)}
-        # for key, value in loaded_dict.items():
-        #
-        #     # Depending on the type key or entry value, use a different cast function on the feature
-        #     if 'data' in key and segments not in key:
-        #         data[key] = tf.decode_raw(features[key], image_dtype)
-        #         data[key] = tf.reshape(data[key], shape=data_dims)
-        #         data[key] = tf.cast(data[key], tf.float32)
-        #
-        #     if segments in key:
-        #         data[key] = tf.decode_raw(features[key], segments_dtype)
-        #         data[key] = tf.reshape(data[key], shape=segments_shape)
-        #         data[key] = tf.cast(data[key], tf.float32)
-        #
-        #     if 'bbox' in key:
-        #         data[key] = tf.decode_raw(features[key], tf.float32)
-        #         data[key] = tf.reshape(data[key], shape=[-1, 5])
-        #         data[key] = tf.cast(data[key], tf.float32)
-        #
-        #     elif 'str' in value: data[key] = tf.cast(features[key], tf.string)
-        #     else: data[key] = tf.string_to_number(features[key], tf.float32)
-        #
-        # return data
 
     def oversample_class(self, example_class, actual_dists=[0.5, 0.5], desired_dists=[], oversampling_coef=0.9):
 
@@ -2813,7 +2789,7 @@ class SODLoader():
         :return: not a damn thing
         """
 
-        # If only one file, just go head and save
+        # If only one file, just go ahead and save
         if xvals ==1:
 
             # Open the file writer
