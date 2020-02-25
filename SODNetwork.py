@@ -1820,14 +1820,16 @@ class SODLoss(object):
 
         self._num_classes = n_class
 
-    def focal_softmax_cross_entropy_with_logits(self, labels, logits, focus=2.0, alpha=0.25,
+    def focal_softmax_cross_entropy_with_logits(labels, logits, focus=2.0, alpha=0.75,
                                                 name='focal_softmax_cross_entropy_with_logits'):
+
         """
         Tensorflow implementation of focal loss from RetinaNet: FL(pt) = −(1 − p)^γ * α * log(p)
+        TODO: Fix multiclass alpha balance implementation
         :param labels: One hot labels in uint8
         :param logits: Raw logits
         :param focus: Higher value minimizes easy examples more. 0 = normal CE
-        :param alpha: balance importance of pos/neg examples, aka class weight
+        :param alpha: balance importance of pos/neg examples, aka class weight. 0.25 = positives weighted less. Use 0.5 for multiclass
         :param name:
         :return: Losses reduced sum to the batch dimension [batch, 1]
         """
@@ -1847,6 +1849,7 @@ class SODLoss(object):
 
             # Where label is 1, return alpha, else return 1-alpha
             a_balance = tf.where(labels_eq_1, alpha, 1 - alpha)
+            a_balance = tf.expand_dims(a_balance[:, 1], -1)
 
             # Where label is 1, return the softmax unmodified, else return 1-softmax
             prob_true = tf.where(labels_eq_1, prob, 1 - prob)
