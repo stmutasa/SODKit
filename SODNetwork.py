@@ -1820,17 +1820,16 @@ class SODLoss(object):
 
         self._num_classes = n_class
 
-    def focal_softmax_cross_entropy_with_logits(labels, logits, focus=2.0, alpha=0.75,
-                                                name='focal_softmax_cross_entropy_with_logits'):
+    def focal_softmax_cross_entropy_with_logits(labels, logits, focus=2.0, alpha=[0.25, 0.75],
+                                                name='Focal_SCE'):
 
         """
         Tensorflow implementation of focal loss from RetinaNet: FL(pt) = −(1 − p)^γ * α * log(p)
-        TODO: Fix multiclass alpha balance implementation
         :param labels: One hot labels in uint8
         :param logits: Raw logits
         :param focus: Higher value minimizes easy examples more. 0 = normal CE
-        :param alpha: balance importance of pos/neg examples, aka class weight. 0.25 = positives weighted less. Use 0.5 for multiclass
-        :param name:
+        :param alpha: Balance factor for each class: Array, list, or tuple of length num_classes
+        :param name: Scope
         :return: Losses reduced sum to the batch dimension [batch, 1]
         """
 
@@ -1838,18 +1837,17 @@ class SODLoss(object):
             # To prevent underflow errors
             eps = 1e-7
 
-            # Make array of ones and multiply by alpha
-            alpha = tf.multiply(tf.cast(tf.ones_like(labels), tf.float32), alpha)
-
             # Normalize the logits to class probabilities
             prob = tf.nn.softmax(logits, -1)
 
             # Returns True where the labels equal 1
             labels_eq_1 = tf.equal(labels, 1)
 
-            # Where label is 1, return alpha, else return 1-alpha
-            a_balance = tf.where(labels_eq_1, alpha, 1 - alpha)
-            a_balance = tf.expand_dims(a_balance[:, 1], -1)
+            # Make the alpha array from the one hot label
+            alpha = tf.multiply(tf.cast(labels, tf.float32), tf.transpose(alpha))
+
+            # Reduce sum to collapse into one column
+            a_balance = tf.reduce_sum(alpha, axis=-1, keepdims=True)
 
             # Where label is 1, return the softmax unmodified, else return 1-softmax
             prob_true = tf.where(labels_eq_1, prob, 1 - prob)
@@ -1857,7 +1855,10 @@ class SODLoss(object):
             # Calculate the modulating factor
             modulating_factor = (1.0 - prob_true) ** focus
 
+            # Get the logits of the softmaxed values
             log_prob = tf.log(prob + eps)
+
+            # Now calculate the loss: FL(pt) = −(1 − p)^γ * α * log(p)
             loss = -tf.reduce_sum(a_balance * modulating_factor * tf.cast(labels, tf.float32) * log_prob, -1)
 
             return loss
