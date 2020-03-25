@@ -556,7 +556,7 @@ class SODLoader():
             header = {'tags': dicoms[0]}
 
             # Get spacing
-            st = abs(int(dicoms[0].ImagePositionPatient[2]) - int(dicoms[1].ImagePositionPatient[2]))
+            st = abs(float(dicoms[0].ImagePositionPatient[2]) - float(dicoms[1].ImagePositionPatient[2]))
             pixel_spacing = dicoms[0].PixelSpacing
             numpySpacing = np.array([st, float(pixel_spacing[0]), float(pixel_spacing[1])])
 
