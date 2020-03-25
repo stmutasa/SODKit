@@ -503,6 +503,85 @@ class SODLoader():
         return image, accno, window, photometric, header
 
 
+    def load_DICOM_VOLS(self, path):
+
+        """
+        This function loads a bunch of jumbled together DICOMs as separate volumes
+        :param: path: The path of the DICOM folder
+        :return: dict of dict with series name and header / volume pairs
+        """
+
+        # Array of DICOM objects to make
+        volumes, save_dict = {}, {}
+
+        # Some DICOMs end in .dcm, others do not
+        fnames = list()
+        for (dirpath, dirnames, filenames) in os.walk(path):
+            fnames += [os.path.join(dirpath, file) for file in filenames]
+
+        # Load the dicoms
+        dicoms = [dicom.read_file(path, force=True) for path in fnames]
+
+        # Check for actual images
+        def _SPP_Exists(dcm):
+            try:
+                _ = dcm.SamplesPerPixel, dcm.ImagePositionPatient
+                return True
+            except:
+                return False
+
+        # Get images only using SamplesPerPixel
+        _dicoms = [x for x in dicoms if _SPP_Exists(x)]
+
+        # Now go through and add to unique volumes
+        for dcm in _dicoms:
+            SIUID = dcm.SeriesInstanceUID
+            if SIUID in volumes.keys():
+                volumes[SIUID].append(dcm)
+            else:
+                volumes[SIUID] = []
+
+        del _dicoms
+
+        # Now work on each volume separately
+        for SIUD, dicoms in volumes.items():
+
+            # Sort the slices
+            dicoms.sort(key=lambda x: int(x.ImagePositionPatient[2]))
+
+            # --- Save first slice for header information
+            header = {'tags': dicoms[0]}
+
+            # Finally, load pixel data. You can use Imageio here
+            try:
+                image = np.stack([self.read_dcm_uncompressed(s) for s in dicoms])
+            except:
+                image = imageio.volread(path, 'DICOM')
+            image = self.compress_bits(image)
+
+            # Convert to Houndsfield units
+            if hasattr(dicoms[0], 'RescaleIntercept') and hasattr(dicoms[0], 'RescaleSlope'):
+                for slice_number in range(len(dicoms)):
+                    intercept = dicoms[slice_number].RescaleIntercept
+                    slope = dicoms[slice_number].RescaleSlope
+
+                    image[slice_number] = slope * image[slice_number].astype(np.float64)
+                    image[slice_number] = image[slice_number].astype('int16')
+                    image[slice_number] += np.int16(intercept)
+
+            # Get description and save dictionary
+            SDesc = str(dicoms[0].SeriesDescription)
+            if SDesc in save_dict.keys():
+                SDesc = SDesc + ('_' + str(dicoms[0].SeriesNumber))
+            save_dict[SDesc] = {'header': header, 'volume': image}
+
+        # Return if not empty
+        if not save_dict:
+            return
+        else:
+            return save_dict
+
+
     def _load_DICOM_ITK(self, path):
 
         """
@@ -1417,7 +1496,7 @@ class SODLoader():
         return mask1
 
 
-    def create_mammo_mask(self, image, threshold=800, check_mask=False):
+    def create_mammo_mask(self, image, threshold=800, check_mask=False, debug=True):
 
         """
 
@@ -1457,7 +1536,7 @@ class SODLoader():
             # If it is, try again
             if mask_idx > 0.8 or mask_idx < 0.1:
 
-                print('Mask Failed... using method 2')
+                if debug: print('Mask Failed... using method 2')
                 del mask
                 mask, _ = self.create_breast_mask2(image)
 
@@ -2467,7 +2546,7 @@ class SODLoader():
             return labels, np.asarray(cn, np.int32)
 
         else:
-            return img, img.shape//2
+            return img, np.asarray(img.shape)//2
 
 
     def all_blobs(self, img):
