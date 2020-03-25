@@ -546,11 +546,19 @@ class SODLoader():
         # Now work on each volume separately
         for SIUD, dicoms in volumes.items():
 
+            # Skip scout images
+            if len(dicoms) < 2: continue
+
             # Sort the slices
             dicoms.sort(key=lambda x: int(x.ImagePositionPatient[2]))
 
             # --- Save first slice for header information
             header = {'tags': dicoms[0]}
+
+            # Get spacing
+            st = abs(int(dicoms[0].ImagePositionPatient[2]) - int(dicoms[1].ImagePositionPatient[2]))
+            pixel_spacing = dicoms[0].PixelSpacing
+            numpySpacing = np.array([st, float(pixel_spacing[0]), float(pixel_spacing[1])])
 
             # Finally, load pixel data. You can use Imageio here
             try:
@@ -573,7 +581,7 @@ class SODLoader():
             SDesc = str(dicoms[0].SeriesDescription)
             if SDesc in save_dict.keys():
                 SDesc = SDesc + ('_' + str(dicoms[0].SeriesNumber))
-            save_dict[SDesc] = {'header': header, 'volume': image}
+            save_dict[SDesc] = {'header': header, 'volume': image, 'spacing': numpySpacing}
 
         # Return if not empty
         if not save_dict:
@@ -827,9 +835,8 @@ class SODLoader():
             # Save the dictionary
             self.save_dict_pickle(pickle_dic, data_root)
 
-
     def load_tfrecords(self, dataset, data_dims=[], image_dtype=tf.float32, segments='label_data',
-                       segments_dtype=tf.float32, segments_shape = []):
+                       segments_dtype=tf.float32, segments_shape=[], pickle_dict='data/filetypes_pickle.p'):
 
         """
         Function to load a tfrecord protobuf. numpy arrays (volumes) should have 'data' in them.
@@ -844,7 +851,7 @@ class SODLoader():
         """
 
         # Pickle load
-        loaded_dict = self.load_dict_pickle()
+        loaded_dict = self.load_dict_pickle(filename=pickle_dict)
 
         # Populate the feature dict
         feature_dict = {'id': tf.FixedLenFeature([], tf.int64)}
