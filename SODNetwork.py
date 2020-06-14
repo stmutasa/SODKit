@@ -1820,7 +1820,7 @@ class SODLoss(object):
 
         self._num_classes = n_class
 
-    def focal_softmax_cross_entropy_with_logits(labels, logits, focus=2.0, alpha=[0.25, 0.75],
+    def focal_softmax_cross_entropy_with_logits(self, labels, logits, focus=2.0, alpha=[0.25, 0.75],
                                                 name='Focal_SCE'):
 
         """
