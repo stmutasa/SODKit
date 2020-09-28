@@ -194,7 +194,7 @@ class SOD_Display(SODLoader):
         """
         Draw box function
         :param img: ndarray input image
-        :param boxes: ndarray all of the boxes in this image
+        :param boxes: ndarray all of the boxes in this image [xmin, ymin, width, height]
         :param text: overlay text
         :return:
         """
@@ -231,7 +231,7 @@ class SOD_Display(SODLoader):
 
         # Generate overlay text
         text = str(text)
-        cv2.putText(img, text=text, org=((img.shape[1]) // 2, (img.shape[0]) // 2), fontFace=3, fontScale=1, color=(255, 0, 0))
+        cv2.putText(img, text=text, org=(0, (img.shape[0]) // 3), fontFace=3, fontScale=1, color=(255, 0, 0))
 
         #
         img = img[:, :, -1::-1]

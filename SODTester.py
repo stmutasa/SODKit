@@ -40,6 +40,7 @@ class SODTester():
         self.MAE = 0
         self.best_MAE = 10
         self.accuracy = 0
+        self.AUC = 0
 
         # Classification variables
         self.TP, self.FP, self.TN, self.FN = 0, 0, 0, 0
@@ -686,7 +687,9 @@ class SODTester():
                     data[serz[z]]['total'] += 1
                 else:
                     data[serz[z]] = {'label': label[z], 'log1': predictions[z], 'total': 1, 'avg': None}
-            except: continue
+            except Exception as e:
+                print('Combine error: ', e)
+                continue
 
         # Initialize new labels and logits
         logga, labba = [], []
